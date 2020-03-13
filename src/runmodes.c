@@ -224,6 +224,9 @@ void RunModeRegisterRunModes(void)
     RunModeIdsNflogRegister();
     RunModeUnixSocketRegister();
     RunModeIpsWinDivertRegister();
+#ifdef HAVE_DPDK
+    RunModeDpdkRegister();
+#endif
 #ifdef UNITTESTS
     UtRunModeRegister();
 #endif

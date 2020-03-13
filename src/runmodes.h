@@ -56,6 +56,7 @@ enum RunModes {
     RUNMODE_REMOVE_SERVICE,
     RUNMODE_CHANGE_SERVICE_PARAMS,
 #endif
+    RUNMODE_DPDK,
     RUNMODE_MAX,
 };
 
@@ -108,6 +109,7 @@ int RunModeNeedsBypassManager(void);
 #include "runmode-unix-socket.h"
 #include "runmode-netmap.h"
 #include "runmode-windivert.h"
+#include "runmode-dpdk.h"
 
 extern int threading_set_cpu_affinity;
 extern float threading_detect_ratio;

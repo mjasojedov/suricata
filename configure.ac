@@ -1427,6 +1427,95 @@
             [[#include <linux/net_tstamp.h>]])
     ])
 
+  # DPDK support
+    AC_ARG_ENABLE(dpdk,
+            AS_HELP_STRING([--enable-dpdk], [Enable DPDK support [default=no]]),
+                          ,[enable_dpdk=no])
+    AS_IF([test "x$enable_dpdk" = "xyes"], [
+        AC_DEFINE([HAVE_DPDK],[1],[DPDK support is available])
+        enable_af_packet="no"
+        
+        AC_ARG_WITH(libdpdk_includes,
+                [  --with-libdpdk-includes=DIR  libdpdk include directory],
+                [with_libdpdk_includes="$withval"],[with_libdpdk_includes=no])
+        AC_ARG_WITH(libdpdk_libraries,
+                [  --with-libdpdk-libraries=DIR    libdpdk library directory],
+                [with_libdpdk_libraries="$withval"],[with_libdpdk_libraries="no"])
+
+        if test "$with_libdpdk_includes" != "no"; then
+            CFLAGS="$CFLAGS -DHAVE_DPDK -I${with_libdpdk_includes} -include ${with_libdpdk_includes}/rte_config.h "
+            CPPFLAGS="${CPPFLAGS} "
+        else
+            if test "${RTE_SDK}" = ""; then
+            echo ""
+            echo "-----------------------------------------------"
+            echo "  ERROR: pkg"
+            echo "  unable to find DPDK pkg path: "
+            echo "-----------------------------------------------"
+            echo ""
+            exit 1
+            else
+            if test -f ${RTE_SDK}/${RTE_TARGET}/include/rte_eal.h; then
+                CFLAGS="$CFLAGS -DHAVE_DPDK -I${RTE_SDK}/${RTE_TARGET}/include/ -include ${RTE_SDK}/${RTE_TARGET}/include/rte_config.h "
+                CPPFLAGS="${CPPFLAGS} "
+            else
+                echo ""
+                echo "-----------------------------------------------"
+                echo "  ERROR: RTE_SDK"
+                echo "  File ${RTE_SDK}/${RTE_TARGET}/include/rte_eal.h not found ...:"
+                echo "-----------------------------------------------"
+                echo ""
+                exit 1
+            fi
+            fi
+        fi
+
+        DPDK_LDADD="no"
+        if test "$with_libdpdk_libraries" != "no"; then
+            DPDK_LDADD=" -pthread -Wl,--no-as-needed -Wl,-export-dynamic -L${with_libdpdk_libraries}/ -Wl,-lrte_flow_classify -Wl,-lrte_pipeline -Wl,-lrte_table -Wl,-lrte_port -Wl,-lrte_pdump -Wl,-lrte_distributor -Wl,-lrte_ip_frag -Wl,-lrte_gro -Wl,-lrte_gso -Wl,-lrte_meter -Wl,-lrte_lpm -Wl,--whole-archive -Wl,-lrte_acl -Wl,--no-whole-archive -Wl,-lrte_jobstats -Wl,-lrte_metrics -Wl,-lrte_bitratestats -Wl,-lrte_latencystats -Wl,-lrte_power -Wl,-lrte_timer -Wl,-lrte_efd -Wl,--whole-archive -Wl,-lrte_cfgfile -Wl,-lrte_hash -Wl,-lrte_member -Wl,-lrte_vhost -Wl,-lrte_kvargs -Wl,-lrte_mbuf -Wl,-lrte_net -Wl,-lrte_ethdev -Wl,-lrte_cryptodev -Wl,-lrte_security -Wl,-lrte_eventdev -Wl,-lrte_mempool -Wl,-lrte_mempool_ring -Wl,-lrte_ring -Wl,-lrte_pci -Wl,-lrte_eal -Wl,-lrte_cmdline -Wl,-lrte_reorder -Wl,-lrte_sched -Wl,-lrte_kni -Wl,-lrte_bus_pci -Wl,-lrte_bus_vdev -Wl,-lrte_mempool_stack -Wl,-lrte_pmd_af_packet -Wl,-lrte_pmd_bond -Wl,-lrte_pmd_e1000 -Wl,-lrte_pmd_failsafe -Wl,-lrte_pmd_i40e -Wl,-lrte_pmd_ixgbe -Wl,-lrte_pmd_kni -Wl,-lrte_pmd_null -Wl,-lrte_pmd_ring -Wl,-lrte_pmd_softnic -Wl,-lrte_pmd_tap -Wl,-lrte_pmd_virtio -Wl,-lrte_pmd_vhost -Wl,-lrte_pmd_null_crypto -Wl,-lrte_pmd_crypto_scheduler -Wl,-lrte_pmd_skeleton_event -Wl,-lrte_pmd_sw_event -Wl,--no-whole-archive -Wl,-lrt -Wl,-lm -Wl,-lnuma -Wl,-ldl -Wl,-export-dynamic -Wl,--as-needed -Wl, ${with_libdpdk_libraries}/libdpdk.a "
+        else
+            if test "${RTE_TARGET}" = ""; then
+            echo ""
+            echo "-----------------------------------------------"
+            echo "  TARGET: $RTE_TARGET"
+            echo "  ERROR: unable to find DPDK TARGET: "
+            echo "-----------------------------------------------"
+            echo ""
+            exit 1
+            else
+            DPDK_LDADD=" -pthread -Wl,--no-as-needed -Wl,-export-dynamic -L${RTE_SDK}/${RTE_TARGET}/lib/ -Wl,-lrte_flow_classify -Wl,-lrte_pipeline -Wl,-lrte_table -Wl,-lrte_port -Wl,-lrte_pdump -Wl,-lrte_distributor -Wl,-lrte_ip_frag -Wl,-lrte_gro -Wl,-lrte_gso -Wl,-lrte_meter -Wl,-lrte_lpm -Wl,--whole-archive -Wl,-lrte_acl -Wl,--no-whole-archive -Wl,-lrte_jobstats -Wl,-lrte_metrics -Wl,-lrte_bitratestats -Wl,-lrte_latencystats -Wl,-lrte_power -Wl,-lrte_timer -Wl,-lrte_efd -Wl,--whole-archive -Wl,-lrte_cfgfile -Wl,-lrte_hash -Wl,-lrte_member -Wl,-lrte_vhost -Wl,-lrte_kvargs -Wl,-lrte_mbuf -Wl,-lrte_net -Wl,-lrte_ethdev -Wl,-lrte_cryptodev -Wl,-lrte_security -Wl,-lrte_eventdev -Wl,-lrte_mempool -Wl,-lrte_mempool_ring -Wl,-lrte_ring -Wl,-lrte_pci -Wl,-lrte_eal -Wl,-lrte_cmdline -Wl,-lrte_reorder -Wl,-lrte_sched -Wl,-lrte_kni -Wl,-lrte_bus_pci -Wl,-lrte_bus_vdev -Wl,-lrte_mempool_stack -Wl,-lrte_pmd_af_packet -Wl,-lrte_pmd_bond -Wl,-lrte_pmd_e1000 -Wl,-lrte_pmd_failsafe -Wl,-lrte_pmd_i40e -Wl,-lrte_pmd_ixgbe -Wl,-lrte_pmd_kni -Wl,-lrte_pmd_null -Wl,-lrte_pmd_ring -Wl,-lrte_pmd_softnic -Wl,-lrte_pmd_tap -Wl,-lrte_pmd_virtio -Wl,-lrte_pmd_vhost -Wl,-lrte_pmd_null_crypto -Wl,-lrte_pmd_crypto_scheduler -Wl,-lrte_pmd_skeleton_event -Wl,-lrte_pmd_sw_event -Wl,--no-whole-archive -Wl,-lrt -Wl,-lm -Wl,-lnuma -Wl,-ldl -Wl,-export-dynamic -Wl,--as-needed -Wl, ${RTE_SDK}/${RTE_TARGET}/lib/libdpdk.a "
+            fi
+        fi
+
+        AC_SUBST(DPDK_LDADD)
+        echo " Added configuration for DPDK-INTEL"
+        echo ""
+    ])
+    AM_CONDITIONAL([BUILD_DPDKINTEL], [test "x$enable_dpdkintel" = "xyes"])
+
+
+# NDP
+    AC_ARG_ENABLE(ndp,
+           AS_HELP_STRING([--enable-ndp], [Enable Ndp support [default=no]]),
+                        ,[enable_ndp=no])
+    AC_ARG_WITH(ndp_includes,
+            [  --with-ndp-includes=DIR ndp include directory],
+            [with_ndp_includes="$withval"],[with_ndp_includes=no])
+    AS_IF([test "x$enable_ndp" = "xyes"], [
+           AC_DEFINE([HAVE_NDP], [1],(Ndp support enabled))
+
+           if test "$with_ndp_includes" != "no"; then
+            CPPFLAGS="${CPPFLAGS} -I${with_ndp_includes}"
+           fi
+           LDFLAGS="${LDFLAGS} -lnfb -lnuma"
+           AC_CHECK_LIB([numa], [numa_bitmask_setbit], , [AC_ERROR(numa.h not found ...)]) 
+           AC_PROG_CC_STDC
+           # change LIBNFB variable, 4th parameter
+           AC_CHECK_LIB([nfb], [nfb_open], , [AC_ERROR(libnfb.h not found ...)])
+           #AC_CHECK_HEADER(libnfb.h,,[AC_ERROR(libnfb.h not found ...)])  // add LIBNETCOPE
+    ])
+
+
   # Netmap support
     AC_ARG_ENABLE(netmap,
             AS_HELP_STRING([--enable-netmap], [Enable Netmap support]),[enable_netmap=$enableval],[enable_netmap=no])
@@ -2603,6 +2692,8 @@ AC_OUTPUT
 
 SURICATA_BUILD_CONF="Suricata Configuration:
   AF_PACKET support:                       ${enable_af_packet}
+  DPDK support:                            ${enable_dpdk}
+  NDP support:                             ${enable_ndp}
   eBPF support:                            ${enable_ebpf}
   XDP support:                             ${have_xdp}
   PF_RING support:                         ${enable_pfring}

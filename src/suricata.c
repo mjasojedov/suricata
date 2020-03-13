@@ -21,6 +21,11 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
+#ifdef HAVE_DPDK
+#include "util-dpdk-common.h"
+#include "util-dpdk.h"
+#endif
+
 #include "suricata-common.h"
 #include "config.h"
 
@@ -150,7 +155,6 @@
 #include "util-coredump-config.h"
 
 #include "util-decode-mime.h"
-
 #include "defrag.h"
 
 #include "runmodes.h"
@@ -178,6 +182,7 @@
 
 #include "rust.h"
 #include "rust-core-gen.h"
+
 
 /*
  * we put this here, because we only use it here in main.
@@ -647,6 +652,9 @@ static void PrintUsage(const char *progname)
 #endif
 #ifdef HAVE_NETMAP
     printf("\t--netmap[=<dev>]                     : run in netmap mode, no value select interfaces from suricata.yaml\n");
+#endif
+#ifdef HAVE_DPDK
+    printf("\t--dpdk                               : run in dpdk mode\n");
 #endif
 #ifdef HAVE_PFRING
     printf("\t--pfring[=<dev>]                     : run in pfring mode, use interfaces from suricata.yaml\n");
@@ -1546,6 +1554,9 @@ static TmEcode ParseCommandLine(int argc, char** argv, SCInstance *suri)
 #ifdef HAVE_NFLOG
         {"nflog", optional_argument, 0, 0},
 #endif
+#ifdef HAVE_DPDK
+        {"dpdk", optional_argument, 0, 0},
+#endif
 #ifdef AFLFUZZ_CONF_TEST
         {"afl-parse-rules", 0, &conf_test_force_success, 1},
 #endif
@@ -1644,6 +1655,17 @@ static TmEcode ParseCommandLine(int argc, char** argv, SCInstance *suri)
                 SCLogError(SC_ERR_NFLOG_NOSUPPORT, "NFLOG not enabled.");
                 return TM_ECODE_FAILED;
 #endif /* HAVE_NFLOG */
+#ifdef HAVE_DPDK
+            } else if (strcmp((long_opts[option_index]).name, "dpdk") == 0) {
+                if (suri->run_mode == RUNMODE_UNKNOWN) {
+                    suri->run_mode = RUNMODE_DPDK;
+                } else {
+                    SCLogError(SC_ERR_MULTIPLE_RUN_MODE, "more than one run mode "
+                            "has been specified");
+                    PrintUsage(argv[0]);
+                    return TM_ECODE_FAILED;
+                }
+#endif
             } else if (strcmp((long_opts[option_index]).name , "pcap") == 0) {
                 if (ParseCommandLinePcapLive(suri, optarg) != TM_ECODE_OK) {
                     return TM_ECODE_FAILED;
@@ -2433,6 +2455,11 @@ static int FinalizeRunMode(SCInstance *suri, char **argv)
         case RUNMODE_UNKNOWN:
             PrintUsage(argv[0]);
             return TM_ECODE_FAILED;
+#ifdef HAVE_DPDK
+        case RUNMODE_DPDK:
+            SCLogInfo("DPDK EAL INIT WORKS!!!");
+            return TM_ECODE_FAILED;
+#endif
         default:
             break;
     }
@@ -2993,6 +3020,12 @@ int main(int argc, char **argv)
 
     /* Initialize the configuration module. */
     ConfInit();
+
+#ifdef HAVE_DPDK
+    ParseDpdkConfig();
+
+    DpdkEalInit();
+#endif
 
     if (ParseCommandLine(argc, argv, &suricata) != TM_ECODE_OK) {
         exit(EXIT_FAILURE);
