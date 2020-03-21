@@ -347,7 +347,6 @@ static void *TmThreadsSlotPktAcqLoop(void *td)
     }
 
     StatsSetupPrivate(tv);
-
     TmThreadsSetFlag(tv, THV_INIT_DONE);
 
     while(run) {
@@ -1137,7 +1136,6 @@ ThreadVars *TmThreadCreate(const char *name, const char *inq_name, const char *i
     if (unlikely(tv == NULL))
         goto error;
     memset(tv, 0, sizeof(ThreadVars));
-
     SC_ATOMIC_INIT(tv->flags);
     SCMutexInit(&tv->perf_public_ctx.m, NULL);
 
@@ -1257,7 +1255,6 @@ ThreadVars *TmThreadCreatePacketHandler(const char *name, const char *inq_name,
         tv->id = TmThreadsRegisterThread(tv, tv->type);
     }
 
-
     return tv;
 }
 
@@ -1368,7 +1365,6 @@ void TmThreadAppend(ThreadVars *tv, int type)
         tv_root[type] = tv;
         tv->next = NULL;
         tv->prev = NULL;
-
         SCMutexUnlock(&tv_root_lock);
 
         return;
@@ -1646,7 +1642,6 @@ again:
     }
 
     SCMutexUnlock(&tv_root_lock);
-
     /* finally wait for all packet threads to have
      * processed all of their 'live' packets so we
      * don't process the last live packets together
@@ -2165,7 +2160,10 @@ again:
         }
     }
     SCMutexUnlock(&tv_root_lock);
-
+    
+    if(tv_root[0] == NULL) {
+       SCLogNotice("Root TV[PPT] is NULL!!"); 
+    }
     SCLogNotice("all %"PRIu16" packet processing threads, %"PRIu16" management "
               "threads initialized, engine started.", ppt_num, mgt_num);
 

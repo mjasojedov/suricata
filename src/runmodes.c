@@ -153,6 +153,12 @@ static const char *RunModeTranslateModeToName(int runmode)
 #else
             return "WINDIVERT(DISABLED)";
 #endif
+#ifdef HAVE_DPDK
+        case RUNMODE_DPDK:
+            return "DPDK";
+#else
+            return "DPDK(DISABLED)";
+#endif
         default:
             FatalError(SC_ERR_UNKNOWN_RUN_MODE, "Unknown runtime mode. Aborting");
     }
@@ -335,6 +341,11 @@ void RunModeDispatch(int runmode, const char *custom_mode)
 #ifdef WINDIVERT
             case RUNMODE_WINDIVERT:
                 custom_mode = RunModeIpsWinDivertGetDefaultMode();
+                break;
+#endif
+#ifdef HAVE_DPDK
+            case RUNMODE_DPDK:
+                custom_mode = RunModeDpdkGetDefaultMode();
                 break;
 #endif
             default:

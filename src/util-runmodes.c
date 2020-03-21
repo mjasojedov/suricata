@@ -24,6 +24,10 @@
  *
  */
 
+#ifdef HAVE_DPDK
+#include "rte_ethdev.h"
+#endif
+
 #include "suricata-common.h"
 #include "config.h"
 #include "tm-threads.h"
@@ -50,6 +54,9 @@
 #include "util-runmodes.h"
 
 #include "flow-hash.h"
+
+/** Suricata instance */
+extern SCInstance suricata;
 
 /** \brief create a queue string for autofp to pass to
  *         the flow queue handler.
@@ -310,15 +317,18 @@ static int RunModeSetLiveCaptureWorkersForDevice(ConfigIfaceThreadsCountFunc Mod
         }
 
         if (single_mode) {
-            snprintf(tname, sizeof(tname), "%s#01-%s", thread_name, visual_devname);
+            // snprintf(tname, sizeof(tname), "%s#01-%s", thread_name, visual_devname);
+            snprintf(tname, sizeof(tname), "%s#01-%s", thread_name, (visual_devname == NULL)?live_dev:visual_devname);
             snprintf(printable_threadname, strlen(thread_name)+5+strlen(live_dev), "%s#01-%s",
                      thread_name, live_dev);
+          
         } else {
             snprintf(tname, sizeof(tname), "%s#%02d-%s", thread_name,
-                     thread+1, visual_devname);
+                     thread+1, (visual_devname == NULL)?live_dev:visual_devname);
             snprintf(printable_threadname, strlen(thread_name)+5+strlen(live_dev), "%s#%02d-%s",
                      thread_name, thread+1, live_dev);
         }
+
         tv = TmThreadCreatePacketHandler(tname,
                 "packetpool", "packetpool",
                 "packetpool", "packetpool",
@@ -327,6 +337,7 @@ static int RunModeSetLiveCaptureWorkersForDevice(ConfigIfaceThreadsCountFunc Mod
             SCLogError(SC_ERR_THREAD_CREATE, "TmThreadsCreate failed");
             exit(EXIT_FAILURE);
         }
+
         tv->printable_name = printable_threadname;
 
         tm_module = TmModuleGetByName(recv_mod_name);
@@ -375,6 +386,11 @@ int RunModeSetLiveCaptureWorkers(ConfigIfaceParserFunc ConfigParser,
                               const char *live_dev)
 {
     int nlive = LiveGetDeviceCount();
+#ifdef HAVE_DPDK
+    if(suricata.run_mode == RUNMODE_DPDK) {
+        nlive = rte_eth_dev_count_avail();
+    }
+#endif
     void *aconf;
     int ldev;
 
@@ -412,7 +428,7 @@ int RunModeSetLiveCaptureSingle(ConfigIfaceParserFunc ConfigParser,
     int nlive = LiveGetDeviceCount();
     const char *live_dev_c = NULL;
     void *aconf;
-
+    SCLogNotice("Number of LiveDevices: %d", nlive);
     if (nlive > 1) {
         SCLogError(SC_ERR_RUNMODE,
                 "Can't use the 'single' runmode with multiple devices");
@@ -420,7 +436,7 @@ int RunModeSetLiveCaptureSingle(ConfigIfaceParserFunc ConfigParser,
     }
 
     if (live_dev != NULL) {
-        aconf = ConfigParser(live_dev);
+        aconf = ConfigParser(live_dev); // live_dev = 0000:03:00.0
         live_dev_c = live_dev;
     } else {
         live_dev_c = LiveGetDeviceName(0);

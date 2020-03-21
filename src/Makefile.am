@@ -384,6 +384,7 @@ runmode-windivert.c runmode-windivert.h \
 runmodes.c runmodes.h \
 rust.h \
 source-af-packet.c source-af-packet.h \
+source-dpdk.c source-dpdk.h \
 source-erf-dag.c source-erf-dag.h \
 source-erf-file.c source-erf-file.h \
 source-ipfw.c source-ipfw.h \
@@ -539,13 +540,14 @@ EXTRA_DIST = tests
 AM_CPPFLAGS = $(all_includes)
 
 # the library search path.
-suricata_LDFLAGS = $(all_libraries) ${SECLDFLAGS}
+suricata_LDFLAGS = $(all_libraries) ${SECLDFLAGS} ${DPDK_LDFLAGS}
 suricata_LDADD = $(HTP_LDADD) $(RUST_LDADD)
 suricata_DEPENDENCIES = $(RUST_SURICATA_LIB)
 
 # default CFLAGS
 AM_CFLAGS = ${OPTIMIZATION_CFLAGS} ${GCC_CFLAGS} ${CLANG_CFLAGS}            \
-    ${SECCFLAGS} ${PCAP_CFLAGS} -DLOCAL_STATE_DIR=\"$(localstatedir)\"      \
+    ${SECCFLAGS} ${PCAP_CFLAGS} ${DPDK_CFLAGS}	                            \ 
+    -DLOCAL_STATE_DIR=\"$(localstatedir)\"                                  \
     -std=gnu99                                                              \
     -Wall -Wno-unused-parameter -Wmissing-prototypes -Wmissing-declarations \
     -Wstrict-prototypes -Wwrite-strings -Wbad-function-cast                 \

@@ -104,6 +104,9 @@
 #include "source-windivert.h"
 #include "source-windivert-prototypes.h"
 
+#include "source-dpdk.h"
+#include "util-dpdk.h"
+
 #include "respond-reject.h"
 
 #include "flow.h"
@@ -897,6 +900,12 @@ void RegisterAllModules(void)
     /* af-packet */
     TmModuleReceiveAFPRegister();
     TmModuleDecodeAFPRegister();
+#ifdef HAVE_DPDK
+    /* dpdk */
+    TmModuleReceiveDPDKRegister();
+    TmModuleDecodeDPDKRegister();
+    //TmModuleVerdictDPDKRegister();
+#endif
     /* netmap */
     TmModuleReceiveNetmapRegister();
     TmModuleDecodeNetmapRegister();
@@ -2457,8 +2466,10 @@ static int FinalizeRunMode(SCInstance *suri, char **argv)
             return TM_ECODE_FAILED;
 #ifdef HAVE_DPDK
         case RUNMODE_DPDK:
-            SCLogInfo("DPDK EAL INIT WORKS!!!");
-            return TM_ECODE_FAILED;
+            if (DpdkPortSetup() != EXIT_SUCCESS) {
+                return TM_ECODE_FAILED;
+            }
+            SCLogInfo("DPDK port initialized.");
 #endif
         default:
             break;
@@ -3022,9 +3033,14 @@ int main(int argc, char **argv)
     ConfInit();
 
 #ifdef HAVE_DPDK
-    ParseDpdkConfig();
-
-    DpdkEalInit();
+    int retval;
+    if((retval = rte_eal_init(argc, (char **)argv)) == -1) {
+        SCLogError(SC_ERR_INITIALIZATION, "DPDK EAL initialization error");
+        return EXIT_FAILURE;
+    } else {
+        argv = &argv[retval];
+        argc -= retval;
+    }
 #endif
 
     if (ParseCommandLine(argc, argv, &suricata) != TM_ECODE_OK) {
