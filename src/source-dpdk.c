@@ -21,7 +21,7 @@
 #include "tmqh-packetpool.h"
 #include "pkt-var.h"
 
-#define BURST_SIZE 32
+#define BURST_SIZE 32 // todo
 
 /**
  * \brief Structure to hold thread specific variables.
@@ -88,21 +88,23 @@ void TmModuleDecodeDPDKRegister(void)
 	SCReturn;
 }
 
+/* ==================================================================== */
 /* ************************** Receive module ************************** */
+
 TmEcode ReceiveDpdkInit(ThreadVars *tv, const void *initdata, void **data)
 {
     SCEnter();
 
-    DpdkTheadVars *dtv = SCMalloc(sizeof(DpdkTheadVars));
-    if (unlikely(dtv == NULL)) {
+    DpdkTheadVars *DpdkTv = SCMalloc(sizeof(DpdkTheadVars));
+    if (unlikely(DpdkTv == NULL)) {
         SCReturnInt(TM_ECODE_FAILED);
     }
-    memset(dtv, 0, sizeof(DpdkTheadVars));
+    memset(DpdkTv, 0, sizeof(DpdkTheadVars));
     
-    dtv->tv = tv;
-    dtv->pkts = 0;
+    DpdkTv->tv = tv;
+    DpdkTv->pkts = 0;
 
-    *data = (void *)dtv;
+    *data = (void *)DpdkTv;
     SCReturnInt(TM_ECODE_OK);
 }
 
@@ -119,9 +121,15 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
 {
     SCEnter();
     uint16_t port;
-    DpdkTheadVars *dtv = (DpdkTheadVars *)data;
+    struct rte_mbuf *tmpMbuf;
+    void *pktAddress;
+    DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
+    TmSlot *s = (TmSlot *)slot;
+    Packet *p;
 
-     /* Run until the application is quit or killed. */
+    DpdkTv->slot = s->slot_next;
+
+    /* Run until the application is quit or killed. */
     for (;;) {
         if (unlikely(suricata_ctl_flags & (SURICATA_STOP))) {
             //DpdkIntelDumpCounters(ptv);
@@ -132,23 +140,51 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
         RTE_ETH_FOREACH_DEV(port) {
             /* Get burst of RX packets. */
             struct rte_mbuf *bufs[BURST_SIZE];
-            const uint16_t nb_rx = rte_eth_rx_burst(port, 0,
-                    bufs, BURST_SIZE);
+            const uint16_t nb_rx = rte_eth_rx_burst(port, 0, bufs, BURST_SIZE);
             if (unlikely(nb_rx == 0)) {
                 continue;
             } 
-            dtv->pkts += nb_rx;
+            
+            for(int i=0; i < nb_rx; i++) {
+                tmpMbuf = bufs[i];
 
-            /* Send burst of TX packets. */
-            const uint16_t nb_tx = rte_eth_tx_burst(port, 0,
-                    bufs, nb_rx);
-            /* Free any unsent packets. */
-            if (unlikely(nb_tx < nb_rx)) {
-                uint16_t buf;
-                for (buf = nb_tx; buf < nb_rx; buf++)
-                    rte_pktmbuf_free(bufs[buf]);
+                p = PacketGetFromQueueOrAlloc();
+                if(p == NULL) {
+                    SCReturnInt(1);
+                }
+
+                PKT_SET_SRC(p, PKT_SRC_WIRE);
+                p->datalink = LINKTYPE_ETHERNET;
+                gettimeofday(&p->ts, NULL);
+                
+                pktAddress = tmpMbuf->buf_addr + rte_pktmbuf_headroom(tmpMbuf);
+
+                if(PacketCopyData(p, (uint8_t *)pktAddress, rte_pktmbuf_pkt_len(tmpMbuf)) == -1) {
+                    TmqhOutputPacketpool(DpdkTv->tv, p);
+                    SCReturnInt(1);
+                }
+
+                if(TmThreadsSlotProcessPkt(DpdkTv->tv, DpdkTv->slot, p) != TM_ECODE_OK) {
+                    TmqhOutputPacketpool(DpdkTv->tv, p);
+                    SCReturnInt(1);
+                }
             }
+
+            DpdkTv->pkts += nb_rx;
+
+            /* --------------------- BYPASS mode --------------------- */
+            /* Send burst of TX packets. */
+            // const uint16_t nb_tx = rte_eth_tx_burst(port, 0,
+            //         bufs, nb_rx);
+            // /* Free any unsent packets. */
+            // if (unlikely(nb_tx < nb_rx)) {
+            //     uint16_t buf;
+            //     for (buf = nb_tx; buf < nb_rx; buf++)
+            //         rte_pktmbuf_free(bufs[buf]);
+            // }
+            /* --------------------------------- --------------------- */
         }
+
     }
 
     SCReturnInt(TM_ECODE_OK);
@@ -158,20 +194,31 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
 void ReceiveDpdkThreadExitStats(ThreadVars *tv, void *data)
 {
     SCEnter();
-    DpdkTheadVars *dtv = (DpdkTheadVars *)data;
+    DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
 
     SCLogNotice("(%s) DPDK: Received packets %" PRIu64 "",
               tv->name,
-              dtv->pkts);
+              DpdkTv->pkts);
 
     return;
 }
 
-
+/* =================================================================== */
 /* ************************** Decode module ************************** */
+
 TmEcode DecodeDpdkInit(ThreadVars *tv, const void *initdata, void **data)
 {
     SCEnter();
+    DecodeThreadVars *dtv = NULL;
+    
+    dtv = DecodeThreadVarsAlloc(tv);
+
+    if(dtv == NULL) {
+        SCReturnInt(TM_ECODE_FAILED);
+    }
+
+    DecodeRegisterPerfCounters(dtv, tv);
+    *data = (void *)dtv;
 
     SCReturnInt(TM_ECODE_OK);
 }
@@ -181,6 +228,10 @@ TmEcode DecodeDpdkDeinit(ThreadVars *tv, void *data)
 {
     SCEnter();
 
+    if(data != NULL) {
+        DecodeThreadVarsFree(tv, data);
+    }
+    
     SCReturnInt(TM_ECODE_OK);
 }
 
@@ -188,6 +239,17 @@ TmEcode DecodeDpdk(ThreadVars *tv, Packet *p, void *data, PacketQueue *pq,
                    PacketQueue *postq)
 {
     SCEnter();
+    DecodeThreadVars *dtv = (DecodeThreadVars *)data;
+
+    if(p->flags & PKT_PSEUDO_STREAM_END) {
+        return TM_ECODE_OK;
+    }
+
+    DecodeUpdatePacketCounters(tv, dtv, p);
+
+    DecodeEthernet(tv, dtv, p, GET_PKT_DATA(p), GET_PKT_LEN(p), pq);
+
+    PacketDecodeFinalize(tv, dtv, p);
 
     SCReturnInt(TM_ECODE_OK);
 }
