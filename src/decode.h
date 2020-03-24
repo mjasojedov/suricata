@@ -605,6 +605,9 @@ typedef struct Packet_
 #ifdef HAVE_NAPATECH
     NapatechPacketVars ntpv;
 #endif
+#ifdef HAVE_DPDK
+    void *DpdkMBufPtr;
+#endif
 } Packet;
 
 /** highest mtu of the interfaces we monitor */

@@ -4,6 +4,8 @@
 #include "runmodes.h"
 #include "runmode-dpdk.h"
 
+#include "source-nfq.h"
+
 static const char *default_mode = NULL;
 
 const char *RunModeDpdkGetDefaultMode(void)
@@ -17,14 +19,23 @@ void RunModeDpdkRegister(void)
     RunModeRegisterNewRunMode(RUNMODE_DPDK, "single", 
                               "Single threaded DPDK mode.",
                               RunModeDpdkSingle);
-    RunModeRegisterNewRunMode(RUNMODE_DPDK, "workers", 
+    // IDS
+    // RunModeRegisterNewRunMode(RUNMODE_DPDK, "workers", 
+    //                           "Workers DPDK mode, each thread does all"
+    //                           " tasks from acquisition to logging",
+    //                           RunModeDpdkWorkers);
+    // IPS
+    RunModeRegisterNewRunMode(RUNMODE_DPDK, "workers",
                               "Workers DPDK mode, each thread does all"
                               " tasks from acquisition to logging",
-                              RunModeDpdkWorkers);
-    
+                              RunModeDpdkIpsWorkers);
     return;
 }
 
+void *DPDKGetThread(int number)
+{
+    return NULL;
+}
 
 int DPDKConfigGetTheadsCount(void *arg)
 {
@@ -104,6 +115,39 @@ int RunModeDpdkWorkers(void)
                                           "ReceiveDPDK",
                                           "DecodeDPDK", thread_name_workers,
                                           (char *)live_dev);
+    if (retval != 0) {
+        SCLogError(SC_ERR_RUNMODE, "Runmode start failed");
+        exit(EXIT_FAILURE);
+    }
+
+    SCLogInfo("RunModeDpdkWorkers initialized");
+
+#endif
+    SCReturnInt(0);
+}
+
+
+/**
+ * \brief Workers version of the IPS DPDK LIVE processing.
+ *
+ * Start N threads with each thread doing all the work.
+ *
+ */
+int RunModeDpdkIpsWorkers(void) {
+     SCEnter();
+    
+#ifdef HAVE_DPDK
+    int retval;
+
+    RunModeInitialize();
+    TimeModeSetLive();
+    LiveDeviceHasNoStats();
+
+    retval = RunModeSetIPSWorker(DPDKGetThread,
+                                 "ReceiveDPDK",
+                                 "VerdictDPDK",
+                                 "DecodeDPDK");
+
     if (retval != 0) {
         SCLogError(SC_ERR_RUNMODE, "Runmode start failed");
         exit(EXIT_FAILURE);

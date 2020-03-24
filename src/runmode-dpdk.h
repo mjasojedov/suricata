@@ -5,7 +5,9 @@ void RunModeDpdkRegister(void);
 const char *RunModeDpdkGetDefaultMode(void);
 int RunModeDpdkSingle(void);
 int RunModeDpdkWorkers(void);
+int RunModeDpdkIpsWorkers(void);
 
+void *DPDKGetThread(int number);
 int DPDKConfigGetTheadsCount(void *arg);
 void *ParseDPDKConfig(const char *arg);
 

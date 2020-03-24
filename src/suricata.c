@@ -902,9 +902,9 @@ void RegisterAllModules(void)
     TmModuleDecodeAFPRegister();
 #ifdef HAVE_DPDK
     /* dpdk */
-    TmModuleReceiveDPDKRegister();
-    TmModuleDecodeDPDKRegister();
-    //TmModuleVerdictDPDKRegister();
+    TmModuleReceiveDpdkRegister();
+    TmModuleDecodeDpdkRegister();
+    TmModuleVerdictDpdkRegister();
 #endif
     /* netmap */
     TmModuleReceiveNetmapRegister();

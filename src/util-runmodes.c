@@ -615,16 +615,24 @@ int RunModeSetIPSWorker(ConfigIPSParserFunc ConfigParser,
     const char *cur_queue = NULL;
 
     int nqueue = LiveGetDeviceCount();
+#ifdef HAVE_DPDK
+    if(suricata.run_mode == RUNMODE_DPDK) {
+        nqueue = rte_eth_dev_count_avail();
+    }
+#endif
 
     for (int i = 0; i < nqueue; i++) {
         /* create the threads */
         cur_queue = LiveGetDeviceName(i);
-        if (cur_queue == NULL) {
-            SCLogError(SC_ERR_RUNMODE, "invalid queue number");
-            exit(EXIT_FAILURE);
-        }
+        // if (cur_queue == NULL) {
+        //     SCLogError(SC_ERR_RUNMODE, "invalid queue number");
+        //     exit(EXIT_FAILURE);
+        // }
         memset(tname, 0, sizeof(tname));
-        snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, cur_queue);
+        snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, 
+                                                (cur_queue == NULL)? 
+                                                    "0000:03:00.0":
+                                                    cur_queue);
 
         tv = TmThreadCreatePacketHandler(tname,
                 "packetpool", "packetpool",

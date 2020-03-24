@@ -30,6 +30,10 @@ typedef struct DpdkTheadVars_
 {
     /* counters */
     uint64_t pkts;
+    
+    uint64_t accepted;
+    uint64_t dropped;
+    
 
     ThreadVars *tv;
     TmSlot *slot;
@@ -39,7 +43,7 @@ typedef struct DpdkTheadVars_
 } DpdkTheadVars;
 
 
-/* ***** Prototypes ***** */
+/* ****************************** Prototypes ******************************* */
 TmEcode ReceiveDpdkInit(ThreadVars *tv, const void *initdata, void **data);
 void ReceiveDpdkThreadExitStats(ThreadVars *tv, void *data);
 TmEcode ReceiveDpdkDeinit(ThreadVars *tv, void *data);
@@ -49,10 +53,16 @@ TmEcode DecodeDpdkInit(ThreadVars *tv, const void *initdata, void **data);
 TmEcode DecodeDpdkDeinit(ThreadVars *tv, void *data);
 TmEcode DecodeDpdk(ThreadVars *tv, Packet *p, void *data, PacketQueue *pq,
                    PacketQueue *postq);
-/* ********************** */
 
+TmEcode VerdictDpdkInit(ThreadVars *tv, const void *initdata, void **data);
+TmEcode VerdictDpdkDeinit(ThreadVars *tv, void *data);
+TmEcode DPDKSetVerdict(ThreadVars *tv, DpdkTheadVars *DpdkTv, Packet *p);
+TmEcode VerdictDpdk(ThreadVars *tv, Packet *p, void *data, PacketQueue *pq,
+                   PacketQueue *postq);
+void VerdictDPDKThreadExitStats(ThreadVars *tv, void *data);
+/* ************************************************************************* */
 
-void TmModuleReceiveDPDKRegister(void)
+void TmModuleReceiveDpdkRegister(void)
 {
     SCEnter();
 
@@ -70,7 +80,7 @@ void TmModuleReceiveDPDKRegister(void)
 	SCReturn;
 }
 
-void TmModuleDecodeDPDKRegister(void)
+void TmModuleDecodeDpdkRegister(void)
 {
     SCEnter();
 
@@ -88,6 +98,24 @@ void TmModuleDecodeDPDKRegister(void)
 	SCReturn;
 }
 
+void TmModuleVerdictDpdkRegister(void)
+{
+    SCEnter();
+
+    tmm_modules[TMM_VERDICTDPDK].name = "VerdictDPDK";
+	tmm_modules[TMM_VERDICTDPDK].ThreadInit = VerdictDpdkInit;
+	tmm_modules[TMM_VERDICTDPDK].Func = VerdictDpdk;
+	tmm_modules[TMM_VERDICTDPDK].PktAcqLoop = NULL;
+	tmm_modules[TMM_VERDICTDPDK].PktAcqBreakLoop = NULL;
+	tmm_modules[TMM_VERDICTDPDK].ThreadExitPrintStats = VerdictDPDKThreadExitStats;
+	tmm_modules[TMM_VERDICTDPDK].ThreadDeinit = DecodeDpdkDeinit;
+	tmm_modules[TMM_VERDICTDPDK].RegisterTests = NULL;
+	tmm_modules[TMM_VERDICTDPDK].cap_flags = 0;
+
+    SCReturn;
+}
+
+
 /* ==================================================================== */
 /* ************************** Receive module ************************** */
 
@@ -103,11 +131,12 @@ TmEcode ReceiveDpdkInit(ThreadVars *tv, const void *initdata, void **data)
     
     DpdkTv->tv = tv;
     DpdkTv->pkts = 0;
+    DpdkTv->accepted = 0;
+    DpdkTv->dropped = 0;
 
     *data = (void *)DpdkTv;
     SCReturnInt(TM_ECODE_OK);
 }
-
 
 TmEcode ReceiveDpdkDeinit(ThreadVars *tv, void *data)
 {
@@ -115,7 +144,6 @@ TmEcode ReceiveDpdkDeinit(ThreadVars *tv, void *data)
 
     SCReturnInt(TM_ECODE_OK);
 }
-
 
 TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
 {
@@ -156,7 +184,8 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
                 PKT_SET_SRC(p, PKT_SRC_WIRE);
                 p->datalink = LINKTYPE_ETHERNET;
                 gettimeofday(&p->ts, NULL);
-                
+                p->DpdkMBufPtr = (void *)tmpMbuf;
+
                 pktAddress = tmpMbuf->buf_addr + rte_pktmbuf_headroom(tmpMbuf);
 
                 if(PacketCopyData(p, (uint8_t *)pktAddress, rte_pktmbuf_pkt_len(tmpMbuf)) == -1) {
@@ -184,7 +213,6 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
             // }
             /* --------------------------------- --------------------- */
         }
-
     }
 
     SCReturnInt(TM_ECODE_OK);
@@ -202,6 +230,7 @@ void ReceiveDpdkThreadExitStats(ThreadVars *tv, void *data)
 
     return;
 }
+
 
 /* =================================================================== */
 /* ************************** Decode module ************************** */
@@ -252,4 +281,128 @@ TmEcode DecodeDpdk(ThreadVars *tv, Packet *p, void *data, PacketQueue *pq,
     PacketDecodeFinalize(tv, dtv, p);
 
     SCReturnInt(TM_ECODE_OK);
+}
+
+
+/* ==================================================================== */
+/* ************************** Verdict module ************************** */
+
+TmEcode VerdictDpdkInit(ThreadVars *tv, const void *initdata, void **data)
+{
+    SCEnter();
+
+    // todo via initdata
+    // Takes slot_data from ReceiveDPDK module
+    //TmSlot *receiveSlot = tv->tm_slots; 
+    // SC_ATOMIC_DECLARE(void *, slot_data); 
+    // (void)SC_ATOMIC_SET((void *)slot_data, (void *)receiveSlot->slot_data);
+    
+    // DpdkTheadVars *DpdkTv = (DpdkTheadVars *)slot_data;
+    // DpdkTv->accepted = 0;
+    // DpdkTv->dropped = 0;
+    //*data = (void *)receiveSlot->slot_da;
+
+    DpdkTheadVars *DpdkTv = SCMalloc(sizeof(DpdkTheadVars));
+    if (unlikely(DpdkTv == NULL)) {
+        SCReturnInt(TM_ECODE_FAILED);
+    }
+    memset(DpdkTv, 0, sizeof(DpdkTheadVars));
+    
+    DpdkTv->tv = tv;
+    DpdkTv->accepted = 0;
+    DpdkTv->dropped = 0;
+
+    *data = (void *)DpdkTv;
+
+    SCReturnInt(TM_ECODE_OK);
+}
+
+TmEcode VerdictDpdkDeinit(ThreadVars *tv, void *data)
+{
+    SCEnter();
+  
+    SCReturnInt(TM_ECODE_OK);
+}
+
+TmEcode DPDKSetVerdict(ThreadVars *tv, DpdkTheadVars *DpdkTv, Packet *p)
+{
+    SCEnter();
+    uint16_t port;
+    struct rte_mbuf *m;
+
+    if (PACKET_TEST_ACTION(p, ACTION_DROP)) {
+        (DpdkTv->dropped)++;
+    } else {
+        (DpdkTv->accepted)++;
+
+        m = (struct rte_mbuf *) p->DpdkMBufPtr;
+        SCLogNotice("Packet virtual address: %d", (uint64_t)m->buf_addr);
+
+        /* Send burst of TX packets. */
+        RTE_ETH_FOREACH_DEV(port) { 
+            const uint16_t nb_tx = rte_eth_tx_burst(port, 0, (struct rte_mbuf **)m, 1);
+            /* Free any unsent packets. */
+            if (unlikely(nb_tx != 1)) {
+                SCLogNotice("Unsuccessfull packet transfer!");
+                rte_pktmbuf_free(m);
+            }
+        }
+
+        // GET_PKT_LEN(p), GET_PKT_DATA(p)
+    }
+  
+    SCReturnInt(TM_ECODE_OK);
+}
+
+TmEcode VerdictDpdk(ThreadVars *tv, Packet *p, void *data, PacketQueue *pq,
+                    PacketQueue *postq)
+{
+    SCEnter();
+
+    TmEcode retval = TM_ECODE_OK;
+    DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
+
+    /* can't verdict a "fake" packet */
+    if (p->flags & PKT_PSEUDO_STREAM_END) {
+        SCReturnInt(TM_ECODE_OK);
+    }
+
+    /* This came from NFQ.
+     *  if this is a tunnel packet we check if we are ready to verdict
+     * already. */
+    if (IS_TUNNEL_PKT(p)) {
+        bool verdict = VerdictTunnelPacket(p);
+
+        /* don't verdict if we are not ready */
+        if (verdict == true) {
+            //SCLogDebug("Setting verdict on tunnel");
+            retval = DPDKSetVerdict(tv, DpdkTv, p->root ? p->root : p);
+        }
+    } else {
+        /* no tunnel, verdict normally */
+        //SCLogDebug("Setting verdict on non-tunnel");
+        retval = DPDKSetVerdict(tv, DpdkTv, p);
+    }
+
+    SCReturnInt(retval);
+}
+
+/**
+ * \brief This function prints stats for the VerdictThread
+ *
+ *
+ * \param tv pointer to ThreadVars
+ * \param data pointer that gets cast into DPDKThreadVars for DpdkTv
+ */
+void VerdictDPDKThreadExitStats(ThreadVars *tv, void *data)
+{
+    SCEnter();
+
+    DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
+    SCLogNotice("DPDK IPS Processing: - (%s) Pkts accepted %" PRIu64 "," 
+                                                "dropped %" PRIu64 "",
+                                            tv->name,
+                                            DpdkTv->accepted,
+                                            DpdkTv->dropped);
+    return;
 }

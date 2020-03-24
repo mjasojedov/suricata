@@ -32,6 +32,8 @@
 #include "runmode-nfq.h"
 #include "output.h"
 
+#include "source-nfq.h"
+
 #include "util-debug.h"
 #include "util-time.h"
 #include "util-cpu.h"
