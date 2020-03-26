@@ -606,7 +606,7 @@ typedef struct Packet_
     NapatechPacketVars ntpv;
 #endif
 #ifdef HAVE_DPDK
-    void *DpdkMBufPtr;
+    struct rte_mbuf **DpdkMBufPtr;
 #endif
 } Packet;
 

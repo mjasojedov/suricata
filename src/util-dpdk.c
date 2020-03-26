@@ -19,34 +19,6 @@ char dpdk_argv[32][50] = {{"suricata"}};
 /* Prototypes */
 int DpdkPortInit(int port, struct rte_mempool *mbuf_pool);
 
-// int ParseDpdkConfig(void)
-// {
-//     SCEnter();
-//     struct rte_cfgfile *file = rte_cfgfile_load("dpdk.cfg", 0);
-//     if(file == NULL) {
-//         //error opening config file
-//     }
-
-//     /* Parse EAL parameters from configuration file */
-//     if(rte_cfgfile_has_section(file, "EAL")) {
-//         int num_entries =  rte_cfgfile_section_num_entries(file, "EAL");
-//         struct rte_cfgfile_entry entries[num_entries];
-//         SCLogNotice(" DPDK configuration | EAL section: %d entries", num_entries);
-
-//         if(rte_cfgfile_section_entries(file, "EAL", entries, num_entries) != -1) {
-//             for(int i = 0; i < num_entries; i++) {
-//                 snprintf(dpdk_argv[i * 2 + 1], 50, "%s", entries[i].name);
-// 				snprintf(dpdk_argv[i * 2 + 2], 50, "%s", entries[i].value);
-// 				SCLogDebug(" - argument: (%s) (%s)", dpdk_argv[i * 2 + 1], dpdk_argv[i * 2 + 2]);
-// 			        dpdk_argv_count += (((entries[i].name) ? 1 : 0) + ((entries[i].value) ? 1 : 0));
-//             }
-//         }
-//     }
-
-//     rte_cfgfile_close(file);
-//     return EXIT_SUCCESS;
-// }
-
 int DpdkPortInit(int port, struct rte_mempool *mbuf_pool)
 {
     struct rte_eth_conf port_conf = port_conf_default;
@@ -61,46 +33,63 @@ int DpdkPortInit(int port, struct rte_mempool *mbuf_pool)
     if (!rte_eth_dev_is_valid_port(port)) {
         return -1;
     }
+
     rte_eth_dev_info_get(port, &dev_info);
     if (retval != 0) {
         printf("Error during getting device (port %u) info: %s\n",
                 port, strerror(-retval));
         return retval;
     }
-    if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
-        port_conf.txmode.offloads |=
-            DEV_TX_OFFLOAD_MBUF_FAST_FREE;
+
+    if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE) {
+        port_conf.txmode.offloads |= DEV_TX_OFFLOAD_MBUF_FAST_FREE;
+    }
+
     /* Configure the Ethernet device. */
     retval = rte_eth_dev_configure(port, rx_rings, tx_rings, &port_conf);
-    if (retval != 0)
+    if (retval != 0) {
         return retval;
+    }
+
     retval = rte_eth_dev_adjust_nb_rx_tx_desc(port, &nb_rxd, &nb_txd);
-    if (retval != 0)
+    if (retval != 0) {
         return retval;
+    }
+
     /* Allocate and set up 1 RX queue per Ethernet port. */
     for (q = 0; q < rx_rings; q++) {
         retval = rte_eth_rx_queue_setup(port, q, nb_rxd,
                 rte_eth_dev_socket_id(port), NULL, mbuf_pool);
-        if (retval < 0)
+        if (retval < 0) {
             return retval;
+        }
     }
+
     txconf = dev_info.default_txconf;
     txconf.offloads = port_conf.txmode.offloads;
+
     /* Allocate and set up 1 TX queue per Ethernet port. */
     for (q = 0; q < tx_rings; q++) {
         retval = rte_eth_tx_queue_setup(port, q, nb_txd,
                 rte_eth_dev_socket_id(port), &txconf);
-        if (retval < 0)
+        if (retval < 0) {
             return retval;
+        }
     }
+
     /* Start the Ethernet port. */
     retval = rte_eth_dev_start(port);
-    if (retval < 0)
+    if (retval < 0) {
         return retval;
+    }
+
     rte_eth_promiscuous_enable(port);
-    if (retval != 0)
+    
+    if (retval != 0) {
         return retval;
-    return 0;
+    }
+
+    return EXIT_SUCCESS;
 }
 
 int DpdkPortSetup(void)
@@ -127,5 +116,6 @@ int DpdkPortSetup(void)
             return EXIT_FAILURE;
         }
     }
+
     return EXIT_SUCCESS;
 }

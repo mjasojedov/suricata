@@ -30,7 +30,6 @@ typedef struct DpdkTheadVars_
 {
     /* counters */
     uint64_t pkts;
-    
     uint64_t accepted;
     uint64_t dropped;
     
@@ -148,6 +147,7 @@ TmEcode ReceiveDpdkDeinit(ThreadVars *tv, void *data)
 TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
 {
     SCEnter();
+
     uint16_t port;
     struct rte_mbuf *tmpMbuf;
     void *pktAddress;
@@ -160,8 +160,7 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
     /* Run until the application is quit or killed. */
     for (;;) {
         if (unlikely(suricata_ctl_flags & (SURICATA_STOP))) {
-            //DpdkIntelDumpCounters(ptv);
-            SCLogDebug(" Received Signal!");
+            SCLogDebug("Received STOP Signal!");
             SCReturnInt(TM_ECODE_OK);
         }
         
@@ -184,7 +183,7 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
                 PKT_SET_SRC(p, PKT_SRC_WIRE);
                 p->datalink = LINKTYPE_ETHERNET;
                 gettimeofday(&p->ts, NULL);
-                p->DpdkMBufPtr = (void *)tmpMbuf;
+                p->DpdkMBufPtr = bufs + (i * sizeof(struct rte_mbuf *));
 
                 pktAddress = tmpMbuf->buf_addr + rte_pktmbuf_headroom(tmpMbuf);
 
@@ -204,7 +203,7 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
             /* --------------------- BYPASS mode --------------------- */
             /* Send burst of TX packets. */
             // const uint16_t nb_tx = rte_eth_tx_burst(port, 0,
-            //         bufs, nb_rx);
+            //         bufs, 1);
             // /* Free any unsent packets. */
             // if (unlikely(nb_tx < nb_rx)) {
             //     uint16_t buf;
@@ -328,23 +327,20 @@ TmEcode DPDKSetVerdict(ThreadVars *tv, DpdkTheadVars *DpdkTv, Packet *p)
 {
     SCEnter();
     uint16_t port;
-    struct rte_mbuf *m;
+    //struct rte_mbuf *m;
 
     if (PACKET_TEST_ACTION(p, ACTION_DROP)) {
         (DpdkTv->dropped)++;
     } else {
         (DpdkTv->accepted)++;
 
-        m = (struct rte_mbuf *) p->DpdkMBufPtr;
-        SCLogNotice("Packet virtual address: %d", (uint64_t)m->buf_addr);
-
-        /* Send burst of TX packets. */
-        RTE_ETH_FOREACH_DEV(port) { 
-            const uint16_t nb_tx = rte_eth_tx_burst(port, 0, (struct rte_mbuf **)m, 1);
+        /* Send processing packet. */
+        RTE_ETH_FOREACH_DEV(port) {
+            const uint16_t nb_tx = rte_eth_tx_burst(port, 0, p->DpdkMBufPtr, 1);
             /* Free any unsent packets. */
             if (unlikely(nb_tx != 1)) {
-                SCLogNotice("Unsuccessfull packet transfer!");
-                rte_pktmbuf_free(m);
+                SCLogDebug("Unsuccessfull packet transfer!");
+                //rte_pktmbuf_free(m);
             }
         }
 
@@ -367,20 +363,13 @@ TmEcode VerdictDpdk(ThreadVars *tv, Packet *p, void *data, PacketQueue *pq,
         SCReturnInt(TM_ECODE_OK);
     }
 
-    /* This came from NFQ.
-     *  if this is a tunnel packet we check if we are ready to verdict
-     * already. */
     if (IS_TUNNEL_PKT(p)) {
         bool verdict = VerdictTunnelPacket(p);
 
-        /* don't verdict if we are not ready */
         if (verdict == true) {
-            //SCLogDebug("Setting verdict on tunnel");
             retval = DPDKSetVerdict(tv, DpdkTv, p->root ? p->root : p);
         }
     } else {
-        /* no tunnel, verdict normally */
-        //SCLogDebug("Setting verdict on non-tunnel");
         retval = DPDKSetVerdict(tv, DpdkTv, p);
     }
 
@@ -399,10 +388,10 @@ void VerdictDPDKThreadExitStats(ThreadVars *tv, void *data)
     SCEnter();
 
     DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
-    SCLogNotice("DPDK IPS Processing: - (%s) Pkts accepted %" PRIu64 "," 
-                                                "dropped %" PRIu64 "",
-                                            tv->name,
-                                            DpdkTv->accepted,
-                                            DpdkTv->dropped);
-    return;
+    SCLogNotice("(%s) IPS: Pkts accepted %" PRIu64 ", " 
+                                "dropped %" PRIu64 "",
+                                tv->name,
+                                DpdkTv->accepted,
+                                DpdkTv->dropped);
+    return;  
 }

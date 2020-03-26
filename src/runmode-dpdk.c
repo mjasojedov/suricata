@@ -16,15 +16,17 @@ const char *RunModeDpdkGetDefaultMode(void)
 void RunModeDpdkRegister(void)
 {
     default_mode = "workers";
+
+    /* ************************ IDS ************************ */
     RunModeRegisterNewRunMode(RUNMODE_DPDK, "single", 
                               "Single threaded DPDK mode.",
                               RunModeDpdkSingle);
-    // IDS
     // RunModeRegisterNewRunMode(RUNMODE_DPDK, "workers", 
     //                           "Workers DPDK mode, each thread does all"
     //                           " tasks from acquisition to logging",
     //                           RunModeDpdkWorkers);
-    // IPS
+
+    /* ************************ IPS ************************ */
     RunModeRegisterNewRunMode(RUNMODE_DPDK, "workers",
                               "Workers DPDK mode, each thread does all"
                               " tasks from acquisition to logging",
@@ -81,8 +83,8 @@ int RunModeDpdkSingle(void)
     }
 
     SCLogInfo("RunModeDpdkSingle initialized");
-
 #endif
+
     SCReturnInt(0);
 }
 
@@ -121,8 +123,8 @@ int RunModeDpdkWorkers(void)
     }
 
     SCLogInfo("RunModeDpdkWorkers initialized");
-
 #endif
+
     SCReturnInt(0);
 }
 
@@ -153,9 +155,9 @@ int RunModeDpdkIpsWorkers(void) {
         exit(EXIT_FAILURE);
     }
 
-    SCLogInfo("RunModeDpdkWorkers initialized");
-
+    SCLogInfo("RunModeDpdkIpsWorkers initialized");
 #endif
+
     SCReturnInt(0);
 }
 
