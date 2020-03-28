@@ -1668,6 +1668,15 @@ static TmEcode ParseCommandLine(int argc, char** argv, SCInstance *suri)
             } else if (strcmp((long_opts[option_index]).name, "dpdk") == 0) {
                 if (suri->run_mode == RUNMODE_UNKNOWN) {
                     suri->run_mode = RUNMODE_DPDK;
+                    
+                    const char live_dev[RTE_ETH_NAME_MAX_LEN];
+                    uint16_t port;
+                    RTE_ETH_FOREACH_DEV(port) {
+                        if(rte_eth_dev_get_name_by_port(port, (char *)live_dev) != 0) {
+                            exit(EXIT_FAILURE);
+                        }
+                        LiveRegisterDeviceName(live_dev);
+                    }
                 } else {
                     SCLogError(SC_ERR_MULTIPLE_RUN_MODE, "more than one run mode "
                             "has been specified");

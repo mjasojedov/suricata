@@ -317,14 +317,14 @@ static int RunModeSetLiveCaptureWorkersForDevice(ConfigIfaceThreadsCountFunc Mod
         }
 
         if (single_mode) {
-            // snprintf(tname, sizeof(tname), "%s#01-%s", thread_name, visual_devname);
-            snprintf(tname, sizeof(tname), "%s#01-%s", thread_name, (visual_devname == NULL)?live_dev:visual_devname);
+            snprintf(tname, sizeof(tname), "%s#01-%s", thread_name, visual_devname);
+            //snprintf(tname, sizeof(tname), "%s#01-%s", thread_name, (visual_devname == NULL)?live_dev:visual_devname);
             snprintf(printable_threadname, strlen(thread_name)+5+strlen(live_dev), "%s#01-%s",
                      thread_name, live_dev);
           
         } else {
             snprintf(tname, sizeof(tname), "%s#%02d-%s", thread_name,
-                     thread+1, (visual_devname == NULL)?live_dev:visual_devname);
+                     thread+1, visual_devname);
             snprintf(printable_threadname, strlen(thread_name)+5+strlen(live_dev), "%s#%02d-%s",
                      thread_name, thread+1, live_dev);
         }
@@ -386,11 +386,11 @@ int RunModeSetLiveCaptureWorkers(ConfigIfaceParserFunc ConfigParser,
                               const char *live_dev)
 {
     int nlive = LiveGetDeviceCount();
-#ifdef HAVE_DPDK
-    if(suricata.run_mode == RUNMODE_DPDK) {
-        nlive = rte_eth_dev_count_avail();
-    }
-#endif
+// #ifdef HAVE_DPDK
+//     if(suricata.run_mode == RUNMODE_DPDK) {
+//         nlive = rte_eth_dev_count_avail();
+//     }
+// #endif
     void *aconf;
     int ldev;
 
@@ -436,7 +436,7 @@ int RunModeSetLiveCaptureSingle(ConfigIfaceParserFunc ConfigParser,
     }
 
     if (live_dev != NULL) {
-        aconf = ConfigParser(live_dev); // live_dev = 0000:03:00.0
+        aconf = ConfigParser(live_dev);
         live_dev_c = live_dev;
     } else {
         live_dev_c = LiveGetDeviceName(0);
@@ -615,11 +615,12 @@ int RunModeSetIPSWorker(ConfigIPSParserFunc ConfigParser,
     const char *cur_queue = NULL;
 
     int nqueue = LiveGetDeviceCount();
-#ifdef HAVE_DPDK
-    if(suricata.run_mode == RUNMODE_DPDK) {
-        nqueue = rte_eth_dev_count_avail();
-    }
-#endif
+// #ifdef HAVE_DPDK
+//     if(suricata.run_mode == RUNMODE_DPDK) {
+//         nqueue = rte_eth_dev_count_avail();
+//         nqueue = 15;
+//     }
+// #endif
 
     for (int i = 0; i < nqueue; i++) {
         /* create the threads */
@@ -629,10 +630,7 @@ int RunModeSetIPSWorker(ConfigIPSParserFunc ConfigParser,
         //     exit(EXIT_FAILURE);
         // }
         memset(tname, 0, sizeof(tname));
-        snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, 
-                                                (cur_queue == NULL)? 
-                                                    "0000:03:00.0":
-                                                    cur_queue);
+        snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, cur_queue);
 
         tv = TmThreadCreatePacketHandler(tname,
                 "packetpool", "packetpool",

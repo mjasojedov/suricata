@@ -30,13 +30,14 @@ typedef struct DpdkTheadVars_
 {
     /* counters */
     uint64_t pkts;
+    uint64_t bytes;
     uint64_t accepted;
     uint64_t dropped;
     
+    const char port[RTE_ETH_NAME_MAX_LEN];
 
     ThreadVars *tv;
     TmSlot *slot;
-
     /* If possible livedevice the capture thread is rattached to. */
     LiveDevice *livedev;
 } DpdkTheadVars;
@@ -130,8 +131,9 @@ TmEcode ReceiveDpdkInit(ThreadVars *tv, const void *initdata, void **data)
     
     DpdkTv->tv = tv;
     DpdkTv->pkts = 0;
-    DpdkTv->accepted = 0;
-    DpdkTv->dropped = 0;
+    DpdkTv->bytes = 0;
+    rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
+    DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
 
     *data = (void *)DpdkTv;
     SCReturnInt(TM_ECODE_OK);
@@ -196,9 +198,12 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
                     TmqhOutputPacketpool(DpdkTv->tv, p);
                     SCReturnInt(1);
                 }
+
+                DpdkTv->bytes += rte_pktmbuf_pkt_len(tmpMbuf);
             }
 
             DpdkTv->pkts += nb_rx;
+             
 
             /* --------------------- BYPASS mode --------------------- */
             /* Send burst of TX packets. */
@@ -223,10 +228,12 @@ void ReceiveDpdkThreadExitStats(ThreadVars *tv, void *data)
     SCEnter();
     DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
 
-    SCLogNotice("(%s) DPDK: Received packets %" PRIu64 "",
+    SCLogNotice("(%s): Received -- pkts %" PRIu64 ", bytes %" PRIu64 "",
               tv->name,
-              DpdkTv->pkts);
+              DpdkTv->pkts,
+              DpdkTv->bytes);
 
+    (void) SC_ATOMIC_ADD(DpdkTv->livedev->pkts, DpdkTv->pkts);
     return;
 }
 
@@ -310,6 +317,8 @@ TmEcode VerdictDpdkInit(ThreadVars *tv, const void *initdata, void **data)
     DpdkTv->tv = tv;
     DpdkTv->accepted = 0;
     DpdkTv->dropped = 0;
+    rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
+    DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
 
     *data = (void *)DpdkTv;
 
@@ -393,5 +402,7 @@ void VerdictDPDKThreadExitStats(ThreadVars *tv, void *data)
                                 tv->name,
                                 DpdkTv->accepted,
                                 DpdkTv->dropped);
+
+    (void) SC_ATOMIC_ADD(DpdkTv->livedev->drop, DpdkTv->dropped);
     return;  
 }
