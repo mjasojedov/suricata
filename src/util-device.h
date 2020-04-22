@@ -42,6 +42,10 @@ typedef struct LiveDevice_ {
     char dev_short[MAX_DEVNAME + 1];
     bool tenant_id_set;
 
+#ifdef HAVE_DPDK
+    uint16_t queues_count;
+#endif
+
     int ignore_checksum;
     int id;
 

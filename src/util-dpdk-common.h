@@ -22,6 +22,7 @@
 #include "util-error.h"
 #include "util-debug.h"
 
+#ifdef HAVE_DPDK
 #include <rte_config.h>
 #include <rte_common.h>
 #include <rte_byteorder.h>
@@ -55,6 +56,6 @@
 #include <rte_tailq.h>
 #include <rte_cfgfile.h>    // rte_cfgfile, 
 #include <rte_hexdump.h>
-
+#endif
 
 #endif

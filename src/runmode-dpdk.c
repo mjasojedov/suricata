@@ -41,7 +41,13 @@ void RunModeDpdkRegister(void)
 
 void *DPDKGetThread(int number)
 {
-    return NULL;
+    DpdkIfaceConfig *aconf = SCMalloc(sizeof(*aconf));
+    const char *live_dev = LiveGetDeviceName(0);
+    
+    aconf->queue_num = number;
+    aconf->live_dev = LiveGetDevice((char *)live_dev);
+    
+    return (void *)aconf;
 }
 
 int DPDKConfigGetTheadsCount(void *arg)
@@ -50,7 +56,7 @@ int DPDKConfigGetTheadsCount(void *arg)
 }
 
 
-void *ParseDPDKConfig(const char *arg)
+void *ParseDPDKConfig(const char *arg) //arg = "0000:0300.00"
 {
     return NULL;
 }
@@ -149,8 +155,15 @@ int RunModeDpdkIpsAutoFp(void)
                                 "ReceiveDPDK",
                                 "VerdictDPDK",
                                 "DecodeDPDK");
+
+    if (retval != 0) {
+        SCLogError(SC_ERR_RUNMODE, "Runmode start failed");
+        exit(EXIT_FAILURE);
+    }
+
+    SCLogInfo("RunModeDpdkIpsAutoFp initialized");
 #endif /* HAVE_DPDK */
-    return retval;
+    SCReturnInt(0);
 }
 
 

@@ -655,6 +655,10 @@ af-packet:
     #use-mmap: no
     #tpacket-v3: yes
 
+dpdk:
+  - interface: default
+    threads: 16 # auto -- 'auto' option will set threads count to count of cpus
+
 # Cross platform libpcap capture support
 pcap:
   - interface: eth0

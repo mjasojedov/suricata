@@ -21,7 +21,11 @@
 #include "tmqh-packetpool.h"
 #include "pkt-var.h"
 
+#ifdef HAVE_DPDK
+
 #define BURST_SIZE 32 // todo
+
+
 
 /**
  * \brief Structure to hold thread specific variables.
@@ -35,6 +39,8 @@ typedef struct DpdkTheadVars_
     uint64_t dropped;
     
     const char port[RTE_ETH_NAME_MAX_LEN];
+
+    uint16_t queue_num;
 
     ThreadVars *tv;
     TmSlot *slot;
@@ -108,7 +114,7 @@ void TmModuleVerdictDpdkRegister(void)
 	tmm_modules[TMM_VERDICTDPDK].PktAcqLoop = NULL;
 	tmm_modules[TMM_VERDICTDPDK].PktAcqBreakLoop = NULL;
 	tmm_modules[TMM_VERDICTDPDK].ThreadExitPrintStats = VerdictDPDKThreadExitStats;
-	tmm_modules[TMM_VERDICTDPDK].ThreadDeinit = DecodeDpdkDeinit;
+	tmm_modules[TMM_VERDICTDPDK].ThreadDeinit = VerdictDpdkDeinit;
 	tmm_modules[TMM_VERDICTDPDK].RegisterTests = NULL;
 	tmm_modules[TMM_VERDICTDPDK].cap_flags = 0;
 
@@ -122,7 +128,7 @@ void TmModuleVerdictDpdkRegister(void)
 TmEcode ReceiveDpdkInit(ThreadVars *tv, const void *initdata, void **data)
 {
     SCEnter();
-
+    DpdkIfaceConfig *aconf = (DpdkIfaceConfig *)initdata;
     DpdkTheadVars *DpdkTv = SCMalloc(sizeof(DpdkTheadVars));
     if (unlikely(DpdkTv == NULL)) {
         SCReturnInt(TM_ECODE_FAILED);
@@ -132,8 +138,11 @@ TmEcode ReceiveDpdkInit(ThreadVars *tv, const void *initdata, void **data)
     DpdkTv->tv = tv;
     DpdkTv->pkts = 0;
     DpdkTv->bytes = 0;
-    rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
-    DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
+    // rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
+    // DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
+
+    DpdkTv->livedev = aconf->live_dev;
+    DpdkTv->queue_num = aconf->queue_num;
 
     *data = (void *)DpdkTv;
     SCReturnInt(TM_ECODE_OK);
@@ -169,7 +178,8 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
         RTE_ETH_FOREACH_DEV(port) {
             /* Get burst of RX packets. */
             struct rte_mbuf *bufs[BURST_SIZE];
-            const uint16_t nb_rx = rte_eth_rx_burst(port, 0, bufs, BURST_SIZE);
+            const uint16_t nb_rx = rte_eth_rx_burst(port, DpdkTv->queue_num, bufs, BURST_SIZE);
+            //const uint16_t nb_rx = rte_eth_rx_burst(port, DpdkTv->queue_num, bufs, BURST_SIZE);
             if (unlikely(nb_rx == 0)) {
                 continue;
             } 
@@ -185,9 +195,10 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
                 PKT_SET_SRC(p, PKT_SRC_WIRE);
                 p->datalink = LINKTYPE_ETHERNET;
                 gettimeofday(&p->ts, NULL);
-                p->DpdkMBufPtr = bufs + (i * sizeof(struct rte_mbuf *));
-
-                pktAddress = tmpMbuf->buf_addr + rte_pktmbuf_headroom(tmpMbuf);
+//                p->DpdkMBufPtr = bufs + (i * sizeof(struct rte_mbuf *));
+                p->DpdkMBufPtr = bufs;
+                
+		pktAddress = tmpMbuf->buf_addr + rte_pktmbuf_headroom(tmpMbuf);
 
                 if(PacketCopyData(p, (uint8_t *)pktAddress, rte_pktmbuf_pkt_len(tmpMbuf)) == -1) {
                     TmqhOutputPacketpool(DpdkTv->tv, p);
@@ -200,9 +211,15 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
                 }
 
                 DpdkTv->bytes += rte_pktmbuf_pkt_len(tmpMbuf);
+                //rte_pktmbuf_free(tmpMbuf);
             }
+            //free pool rte_pktmbuf_free
+           
+ 	    for(int i = 0; i<nb_rx; i++) {
+	    	rte_pktmbuf_free(bufs[i]);
+	    }
 
-            DpdkTv->pkts += nb_rx;
+	     DpdkTv->pkts += nb_rx;
              
 
             /* --------------------- BYPASS mode --------------------- */
@@ -233,7 +250,7 @@ void ReceiveDpdkThreadExitStats(ThreadVars *tv, void *data)
               DpdkTv->pkts,
               DpdkTv->bytes);
 
-    (void) SC_ATOMIC_ADD(DpdkTv->livedev->pkts, DpdkTv->pkts);
+    //(void) SC_ATOMIC_ADD(DpdkTv->livedev->pkts, DpdkTv->pkts);
     return;
 }
 
@@ -308,6 +325,7 @@ TmEcode VerdictDpdkInit(ThreadVars *tv, const void *initdata, void **data)
     // DpdkTv->dropped = 0;
     //*data = (void *)receiveSlot->slot_da;
 
+    DpdkIfaceConfig *aconf = (DpdkIfaceConfig *)initdata;
     DpdkTheadVars *DpdkTv = SCMalloc(sizeof(DpdkTheadVars));
     if (unlikely(DpdkTv == NULL)) {
         SCReturnInt(TM_ECODE_FAILED);
@@ -317,8 +335,11 @@ TmEcode VerdictDpdkInit(ThreadVars *tv, const void *initdata, void **data)
     DpdkTv->tv = tv;
     DpdkTv->accepted = 0;
     DpdkTv->dropped = 0;
-    rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
-    DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
+    //rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
+    //DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
+    DpdkTv->livedev = aconf->live_dev;
+    DpdkTv->queue_num = aconf->queue_num;
+
 
     *data = (void *)DpdkTv;
 
@@ -344,14 +365,16 @@ TmEcode DPDKSetVerdict(ThreadVars *tv, DpdkTheadVars *DpdkTv, Packet *p)
         (DpdkTv->accepted)++;
 
         /* Send processing packet. */
-        RTE_ETH_FOREACH_DEV(port) {
-            const uint16_t nb_tx = rte_eth_tx_burst(port, 0, p->DpdkMBufPtr, 1);
+        //RTE_ETH_FOREACH_DEV(port) {
+        const uint16_t nb_tx = rte_eth_tx_burst(0, DpdkTv->queue_num, p->DpdkMBufPtr, 1);
+//        SCLogNotice("nv_tx: %d\n", nb_tx);
+            //const uint16_t nb_tx = rte_eth_tx_burst(port, DpdkTv->queue_num, p->DpdkMBufPtr, 1);
             /* Free any unsent packets. */
-            if (unlikely(nb_tx != 1)) {
-                SCLogDebug("Unsuccessfull packet transfer!");
-                //rte_pktmbuf_free(m);
-            }
-        }
+        //    if (unlikely(nb_tx != 1)) {
+         //       SCLogDebug("Unsuccessfull packet transfer!");
+          //      rte_pktmbuf_free(*(p->DpdkMBufPtr));
+           // }
+    //    }
 
         // GET_PKT_LEN(p), GET_PKT_DATA(p)
     }
@@ -403,6 +426,8 @@ void VerdictDPDKThreadExitStats(ThreadVars *tv, void *data)
                                 DpdkTv->accepted,
                                 DpdkTv->dropped);
 
-    (void) SC_ATOMIC_ADD(DpdkTv->livedev->drop, DpdkTv->dropped);
+    //(void) SC_ATOMIC_ADD(DpdkTv->livedev->drop, DpdkTv->dropped);
     return;  
 }
+
+#endif

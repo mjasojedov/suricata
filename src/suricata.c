@@ -1668,15 +1668,7 @@ static TmEcode ParseCommandLine(int argc, char** argv, SCInstance *suri)
             } else if (strcmp((long_opts[option_index]).name, "dpdk") == 0) {
                 if (suri->run_mode == RUNMODE_UNKNOWN) {
                     suri->run_mode = RUNMODE_DPDK;
-                    
-                    const char live_dev[RTE_ETH_NAME_MAX_LEN];
-                    uint16_t port;
-                    RTE_ETH_FOREACH_DEV(port) {
-                        if(rte_eth_dev_get_name_by_port(port, (char *)live_dev) != 0) {
-                            exit(EXIT_FAILURE);
-                        }
-                        LiveRegisterDeviceName(live_dev);
-                    }
+
                 } else {
                     SCLogError(SC_ERR_MULTIPLE_RUN_MODE, "more than one run mode "
                             "has been specified");
@@ -2474,11 +2466,11 @@ static int FinalizeRunMode(SCInstance *suri, char **argv)
             PrintUsage(argv[0]);
             return TM_ECODE_FAILED;
 #ifdef HAVE_DPDK
-        case RUNMODE_DPDK:
-            if (DpdkPortSetup() != EXIT_SUCCESS) {
-                return TM_ECODE_FAILED;
-            }
-            SCLogInfo("DPDK port initialized.");
+        // case RUNMODE_DPDK:
+        //     if (DpdkPortSetup() != EXIT_SUCCESS) {
+        //         return TM_ECODE_FAILED;
+        //     }
+        //     SCLogInfo("DPDK port initialized.");
 #endif
         default:
             break;
@@ -2838,7 +2830,13 @@ static int PostConfLoadedSetup(SCInstance *suri)
     if (suri->run_mode == RUNMODE_NFQ)
         NFQInitConfig(FALSE);
 #endif
-
+#ifdef HAVE_DPDK
+    if (suri->run_mode == RUNMODE_DPDK) {
+        if(RegisterDpdkPort() != TM_ECODE_OK) {
+            SCReturnInt(TM_ECODE_FAILED);
+        }
+    }
+#endif
     /* Load the Host-OS lookup. */
     SCHInfoLoadFromConfig();
 
@@ -3043,6 +3041,7 @@ int main(int argc, char **argv)
 
 #ifdef HAVE_DPDK
     int retval;
+    rte_log_set_global_level(RTE_LOG_WARNING);
     if((retval = rte_eal_init(argc, (char **)argv)) == -1) {
         SCLogError(SC_ERR_INITIALIZATION, "DPDK EAL initialization error");
         return EXIT_FAILURE;

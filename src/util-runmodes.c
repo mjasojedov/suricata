@@ -614,13 +614,17 @@ int RunModeSetIPSWorker(ConfigIPSParserFunc ConfigParser,
     TmModule *tm_module = NULL;
     const char *cur_queue = NULL;
 
+
     int nqueue = LiveGetDeviceCount();
-// #ifdef HAVE_DPDK
-//     if(suricata.run_mode == RUNMODE_DPDK) {
-//         nqueue = rte_eth_dev_count_avail();
-//         nqueue = 15;
-//     }
-// #endif
+#ifdef HAVE_DPDK
+    char *device_name;
+    if(suricata.run_mode == RUNMODE_DPDK) {
+        device_name = LiveGetDeviceName(0);
+        LiveDevice *live_device = LiveGetDevice(device_name);
+        nqueue = live_device->queues_count;
+    }
+#endif
+    //nqueue = 5;
 
     for (int i = 0; i < nqueue; i++) {
         /* create the threads */
@@ -630,8 +634,12 @@ int RunModeSetIPSWorker(ConfigIPSParserFunc ConfigParser,
         //     exit(EXIT_FAILURE);
         // }
         memset(tname, 0, sizeof(tname));
-        snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, cur_queue);
-
+        if(suricata.run_mode == RUNMODE_DPDK) {
+            snprintf(tname, sizeof(tname), "%s-DPDK#%d", thread_name_workers, i);
+        } else {
+            snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, cur_queue);
+        }
+        // snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, cur_queue);
         tv = TmThreadCreatePacketHandler(tname,
                 "packetpool", "packetpool",
                 "packetpool", "packetpool",

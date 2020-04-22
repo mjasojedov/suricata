@@ -382,10 +382,11 @@ static void *TmThreadsSlotPktAcqLoop(void *td)
     PacketPoolDestroy();
 
     for (slot = s; slot != NULL; slot = slot->slot_next) {
+        //SCLogNotice("1");
         if (slot->SlotThreadExitPrintStats != NULL) {
             slot->SlotThreadExitPrintStats(tv, SC_ATOMIC_GET(slot->slot_data));
         }
-
+        //SCLogNotice("2");
         if (slot->SlotThreadDeinit != NULL) {
             r = slot->SlotThreadDeinit(tv, SC_ATOMIC_GET(slot->slot_data));
             if (r != TM_ECODE_OK) {
@@ -393,6 +394,7 @@ static void *TmThreadsSlotPktAcqLoop(void *td)
                 goto error;
             }
         }
+        //SCLogNotice("3");
         CheckSlot(slot);
     }
 
