@@ -8,6 +8,10 @@
 
 #ifdef HAVE_DPDK
 
+#define DEFAULT_RX_RING_SIZE 1024
+#define DEFAULT_TX_RING_SIZE 1024
+
+
 #define RX_RING_SIZE 1024
 #define TX_RING_SIZE 1024
 //#define NUM_MBUFS 8191
@@ -17,9 +21,137 @@
 
 static const struct rte_eth_conf port_conf_default = {
     .rxmode = {
+        .mq_mode = ETH_MQ_RX_NONE,
         .max_rx_pkt_len = RTE_ETHER_MAX_LEN,
     },
+    .txmode = {
+        .mq_mode = ETH_MQ_TX_NONE,
+    },
 };
+
+int DpdkPortInit_new(int port, struct rte_mempool *mbuf_pool, uint16_t nb_queues)
+{
+    // struct rte_eth_conf port_conf = port_conf_default;
+    // uint16_t rx_rings, tx_rings; // initialized by configuration in .yaml
+    // uint16_t nb_rxd = DEFAULT_RX_RING_SIZE;
+    // uint16_t nb_txd = DEFAULT_TX_RING_SIZE;
+    // int retval;
+    // uint16_t q;
+    // struct rte_eth_dev_info dev_info;
+    // struct rte_eth_txconf txconf;
+
+    // if (!rte_eth_dev_is_valid_port(port)) {
+    //     return -1;
+    // }
+
+    // rte_eth_dev_info_get(port, &dev_info);
+
+    // if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE) {
+    //     port_conf.txmode.offloads |= DEV_TX_OFFLOAD_MBUF_FAST_FREE;
+    // }
+
+    // // todo
+    // /* Get threads/queues configuration form suricata.yaml file. */
+    // // if(SetRingsCount(&rx_rings, &tx_rings, (void *)&dev_info) != EXIT_SUCCESS) {
+    // //     SCLogInfo("Unable to set rings count.");
+    // //     return EXIT_FAILURE;
+    // // }
+
+    // /* Configure the Ethernet device. */
+    // retval = rte_eth_dev_configure(port, nb_queues, nb_queues, &port_conf);
+    // if (retval != 0) {
+    //     return retval;
+    // }
+
+    // retval = rte_eth_dev_adjust_nb_rx_tx_desc(port, &nb_rxd, &nb_txd);
+    // if (retval != 0) {
+    //     return retval;
+    // }
+
+    // /* Allocate and set up 1 RX queue per Ethernet port. */
+    // for (q = 0; q < nb_queues; q++) {
+    //     retval = rte_eth_rx_queue_setup(port, q, nb_rxd,
+    //             rte_eth_dev_socket_id(port), NULL, mbuf_pool);
+    //     if (retval < 0) {
+    //         return retval;
+    //     }
+    // }
+
+    // txconf = dev_info.default_txconf;
+    // txconf.offloads = port_conf.txmode.offloads;
+
+    // /* Allocate and set up 1 TX queue per Ethernet port. */
+    // for (q = 0; q < nb_queues; q++) {
+    //     retval = rte_eth_tx_queue_setup(port, q, nb_txd,
+    //             rte_eth_dev_socket_id(port), &txconf);
+    //     if (retval < 0) {
+    //         return retval;
+    //     }
+    // }
+
+    // /* Start the Ethernet port. */
+    // retval = rte_eth_dev_start(port);
+    // if (retval < 0) {
+    //     return retval;
+    // }
+
+    // rte_eth_promiscuous_enable(port);
+    
+    struct rte_eth_conf port_conf = {
+		.rxmode = {
+			.mq_mode = ETH_MQ_RX_NONE,
+			.max_rx_pkt_len = RTE_ETHER_MAX_LEN,
+		},
+		.txmode = {
+			.mq_mode = ETH_MQ_TX_NONE,
+		},
+	};
+
+	int socket_id = rte_eth_dev_socket_id(port);
+	uint16_t q_id;
+	int retval;
+
+	if (!rte_eth_dev_is_valid_port(port))
+		return -1;
+
+	retval = rte_eth_dev_configure(port, nb_queues, nb_queues, &port_conf);
+	if (retval != 0)
+		return retval;
+
+	uint16_t nb_rxd = DEFAULT_RX_RING_SIZE;
+	uint16_t nb_txd = DEFAULT_TX_RING_SIZE;
+	retval = rte_eth_dev_adjust_nb_rx_tx_desc(port, &nb_rxd, &nb_txd);
+	if (retval != 0)
+		return retval;
+
+	for (q_id = 0; q_id < nb_queues; q_id++) {
+		retval = rte_eth_rx_queue_setup(port, q_id, nb_rxd, socket_id, NULL, mbuf_pool);
+		if (retval < 0)
+			return retval;
+	}
+
+	for (q_id = 0; q_id < nb_queues; q_id++) {
+		retval = rte_eth_tx_queue_setup(port, q_id, nb_txd, socket_id, NULL);
+		if (retval < 0)
+			return retval;
+	}
+
+	retval = rte_eth_dev_start(port);
+	if (retval < 0)
+		return retval;
+
+	rte_eth_promiscuous_enable(port);
+
+    return EXIT_SUCCESS;
+}
+
+/*****************************************************************/
+/*****************************************************************/
+
+
+
+
+
 
 
 /* Prototypes */
@@ -155,10 +287,6 @@ int DpdkPortInit(int port, struct rte_mempool *mbuf_pool)
 
     rte_eth_promiscuous_enable(port);
     
-    if (retval != 0) {
-        return retval;
-    }
-
     return EXIT_SUCCESS;
 }
 

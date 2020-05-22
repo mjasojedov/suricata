@@ -1,5 +1,6 @@
 #include "util-dpdk-common.h"
 #include "source-dpdk.h"
+#include "util-dpdk.h"
 
 #include "suricata-common.h"
 #include "suricata.h"
@@ -23,9 +24,28 @@
 
 #ifdef HAVE_DPDK
 
+#define DEFAULT_MEMPOOL_SIZE 64*1024
+#define DEFAULT_MEMPOOL_CACHE_SIZE 250
+#define DEFAULT_PKT_SIZE 1518
 #define BURST_SIZE 32 // todo
 
+typedef enum DPDKMode_ {
+	ETHDEV_MODE = 0,
+	ETHDEV_RING_MODE = 1,
+	NATIVE_RING_MODE = 2,
+	__MODES_COUNT,
+} DPDKMode;
 
+struct context {
+	DPDKMode mode;
+	int socket_id;
+	uint16_t port_id;
+	uint16_t nb_queues;
+	const char *port_name;
+	struct rte_mempool *pool;
+	struct rte_ring **rx_rings;
+	struct rte_ring **tx_rings;
+};
 
 /**
  * \brief Structure to hold thread specific variables.
@@ -47,6 +67,172 @@ typedef struct DpdkTheadVars_
     /* If possible livedevice the capture thread is rattached to. */
     LiveDevice *livedev;
 } DpdkTheadVars;
+
+struct context *dpdk_config;
+static DpdkTheadVars *dpdk_th_vars;
+
+int DPDKInitConfig(void);
+void DPDKAllocateThreadVars(void);
+void DPDKContextsClean(void);
+
+/* **************************** Setup Functions **************************** */
+int DPDKInitConfig(void) 
+{
+
+    int retval = EXIT_SUCCESS;
+    // Get dpdk mode from .yaml configuration file
+    const char *strMode = NULL;
+    const char *strExternPort = NULL;
+    
+    int processType = rte_eal_process_type();
+    dpdk_config = SCMalloc(sizeof(struct context));
+    if (unlikely(dpdk_config == NULL)) {
+        SCReturnInt(TM_ECODE_FAILED);
+    }
+    memset(dpdk_config, 0, sizeof(struct context));
+
+
+    if (ConfGetValue("dpdk.mode", &strMode) != 1) {
+        dpdk_config->mode = ETHDEV_MODE; // default value
+    } else if (!strcmp(strMode, "ethdev") && processType == RTE_PROC_PRIMARY) {
+        dpdk_config->mode = ETHDEV_MODE;
+    } else if (!strcmp(strMode, "ethdev-ring") && processType != RTE_PROC_PRIMARY) {
+        dpdk_config->mode = ETHDEV_RING_MODE;
+    } else if (!strcmp(strMode, "native-ring") && processType != RTE_PROC_PRIMARY) {
+        dpdk_config->mode = NATIVE_RING_MODE;
+    } else {
+        //error message
+        rte_eal_cleanup();
+        exit(EXIT_FAILURE);
+    }
+ 
+    dpdk_config->port_id = 0;
+    dpdk_config->port_name = (ConfGetValue("dpdk.port-extern", &strExternPort) != 1)
+                                ? "suricata"
+                                : strExternPort;
+    dpdk_config->socket_id = rte_socket_id();
+	dpdk_config->nb_queues = rte_lcore_count();
+
+    // struct rte_ring *rx_rings[dpdk_config->nb_queues];
+	// struct rte_ring *tx_rings[dpdk_config->nb_queues];
+
+    dpdk_config->rx_rings = SCMalloc(sizeof(struct rte_ring *) * dpdk_config->nb_queues);
+    if (unlikely(dpdk_config->rx_rings == NULL)) {
+        SCReturnInt(TM_ECODE_FAILED);
+    }
+    memset(dpdk_config->rx_rings, 0, sizeof(struct rte_ring *) * dpdk_config->nb_queues);
+
+    dpdk_config->tx_rings = SCMalloc(sizeof(struct rte_ring *) * dpdk_config->nb_queues);
+    if (unlikely(dpdk_config->tx_rings == NULL)) {
+        SCReturnInt(TM_ECODE_FAILED);
+    }
+    memset(dpdk_config->tx_rings, 0, sizeof(struct rte_ring *) * dpdk_config->nb_queues);
+
+	// dpdk_config->rx_rings = rx_rings;
+	// dpdk_config->tx_rings = tx_rings;
+
+    if (dpdk_config->mode == ETHDEV_RING_MODE || dpdk_config->mode == NATIVE_RING_MODE) {
+		uint16_t i;
+		for (i = 0; i < dpdk_config->nb_queues; i++) {
+			char name[64];
+
+			snprintf(name, sizeof(name), "port_%s_tx%" PRIu16, dpdk_config->port_name, i);
+			dpdk_config->rx_rings[i] = rte_ring_lookup(name);
+			if (dpdk_config->rx_rings[i] == NULL) {
+                SCLogInfo("rte_ring_lookup(): cannot get rx ring '%s'\n", name);
+				retval = EXIT_FAILURE;
+				//goto rxtx_rings_fail;
+                SCReturnInt(EXIT_FAILURE);
+			}
+
+			snprintf(name, sizeof(name), "port_%s_rx%" PRIu16, dpdk_config->port_name, i);
+			dpdk_config->tx_rings[i] = rte_ring_lookup(name);
+			if (dpdk_config->tx_rings[i] == NULL) {
+                SCLogInfo("rte_ring_lookup(): cannot get tx ring '%s'\n", name);
+				retval = EXIT_FAILURE;
+				//goto rxtx_rings_fail;
+                SCReturnInt(EXIT_FAILURE);
+			}
+		}
+	}
+
+    if (dpdk_config->mode == ETHDEV_MODE) {
+		dpdk_config->pool = rte_pktmbuf_pool_create("pktmbuf_pool", DEFAULT_MEMPOOL_SIZE,
+				DEFAULT_MEMPOOL_CACHE_SIZE, 0, DEFAULT_PKT_SIZE, dpdk_config->socket_id);
+
+		if (dpdk_config->pool == NULL) {
+            SCLogInfo("rte_pktmbuf_pool_create() has failed");
+			retval = EXIT_FAILURE;
+			//goto mempool_fail;
+            SCReturnInt(EXIT_FAILURE);
+		}
+
+	} else if (dpdk_config->mode == ETHDEV_RING_MODE) {
+		char name[64];
+		snprintf(name, sizeof(name), "port_%s", dpdk_config->port_name);
+		dpdk_config->pool = rte_mempool_lookup(name);
+		if (dpdk_config->pool == NULL) {
+            SCLogInfo("rte_mempool_lookup(): cannot get mempool '%s'", name);
+			retval = EXIT_FAILURE;
+            //goto mempool_fail;
+			SCReturnInt(EXIT_FAILURE);
+		}
+
+		dpdk_config->port_id = rte_eth_from_rings("extern_port",
+                                dpdk_config->rx_rings,
+                                dpdk_config->nb_queues,
+                                dpdk_config->tx_rings,
+                                dpdk_config->nb_queues,
+                                dpdk_config->socket_id);
+	}
+
+    if (dpdk_config->mode == ETHDEV_MODE || dpdk_config->mode == ETHDEV_RING_MODE) {
+		if (DpdkPortInit_new(dpdk_config->port_id, dpdk_config->pool, dpdk_config->nb_queues) != 0) {
+            SCLogInfo("ethdev_init(): cannot init port %" PRIu16 "", dpdk_config->port_id);
+            retval = EXIT_FAILURE;
+            SCReturnInt(EXIT_FAILURE);
+		}
+	}
+
+// ethdev_fail:
+// 	if (ctx.mode == ETHDEV_MODE)
+// 		rte_mempool_free(ctx.pool);
+
+// mempool_fail:
+// rxtx_rings_fail:
+// 	rte_eal_cleanup();
+
+    SCReturnInt(retval);
+
+    // if(RegisterDpdkPort() != TM_ECODE_OK) {
+    //     SCReturnInt(TM_ECODE_FAILED);
+    // }
+
+
+}
+
+void DPDKAllocateThreadVars(void)
+{
+    void *ptr = SCRealloc(dpdk_th_vars, rte_lcore_count() * sizeof(DpdkTheadVars));
+    if (ptr == NULL) {
+        SCLogError(SC_ERR_MEM_ALLOC, "Unable to allocate DPDKThreadVars");
+        DPDKContextsClean();
+        exit(EXIT_FAILURE);
+    }
+
+    dpdk_th_vars = (DpdkTheadVars *)ptr;
+}
+
+/**
+ * \brief Clean global contexts. Must be called on exit.
+ */
+void DPDKContextsClean(void)
+{
+    if (dpdk_th_vars != NULL) {
+        SCFree(dpdk_th_vars);
+        dpdk_th_vars = NULL;
+    }
+}
 
 
 /* ****************************** Prototypes ******************************* */
@@ -129,19 +315,20 @@ TmEcode ReceiveDpdkInit(ThreadVars *tv, const void *initdata, void **data)
 {
     SCEnter();
     DpdkIfaceConfig *aconf = (DpdkIfaceConfig *)initdata;
-    DpdkTheadVars *DpdkTv = SCMalloc(sizeof(DpdkTheadVars));
-    if (unlikely(DpdkTv == NULL)) {
-        SCReturnInt(TM_ECODE_FAILED);
-    }
-    memset(DpdkTv, 0, sizeof(DpdkTheadVars));
-    
+    // DpdkTheadVars *DpdkTv = SCMalloc(sizeof(DpdkTheadVars));
+    // if (unlikely(DpdkTv == NULL)) {
+    //     SCReturnInt(TM_ECODE_FAILED);
+    // }
+    // memset(DpdkTv, 0, sizeof(DpdkTheadVars));
+ 
+    DpdkTheadVars *DpdkTv =  &dpdk_th_vars[aconf->queue_num];
     DpdkTv->tv = tv;
     DpdkTv->pkts = 0;
     DpdkTv->bytes = 0;
     // rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
     // DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
 
-    DpdkTv->livedev = aconf->live_dev;
+    //DpdkTv->livedev = aconf->live_dev;
     DpdkTv->queue_num = aconf->queue_num;
 
     *data = (void *)DpdkTv;
@@ -151,6 +338,15 @@ TmEcode ReceiveDpdkInit(ThreadVars *tv, const void *initdata, void **data)
 TmEcode ReceiveDpdkDeinit(ThreadVars *tv, void *data)
 {
     SCEnter();
+
+    if (dpdk_config->mode == ETHDEV_MODE || dpdk_config->mode == ETHDEV_RING_MODE) {
+		rte_eth_dev_close(dpdk_config->port_id);
+	}
+
+	if (dpdk_config->mode == ETHDEV_MODE)
+		rte_mempool_free(dpdk_config->pool);
+
+	rte_eal_cleanup();
 
     SCReturnInt(TM_ECODE_OK);
 }
@@ -165,6 +361,8 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
     DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
     TmSlot *s = (TmSlot *)slot;
     Packet *p;
+    struct rte_mbuf *bufs[BURST_SIZE];
+    uint16_t nb_rx, nb_tx;
 
     DpdkTv->slot = s->slot_next;
 
@@ -175,65 +373,58 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
             SCReturnInt(TM_ECODE_OK);
         }
         
-        RTE_ETH_FOREACH_DEV(port) {
-            /* Get burst of RX packets. */
-            struct rte_mbuf *bufs[BURST_SIZE];
-            const uint16_t nb_rx = rte_eth_rx_burst(port, DpdkTv->queue_num, bufs, BURST_SIZE);
-            //const uint16_t nb_rx = rte_eth_rx_burst(port, DpdkTv->queue_num, bufs, BURST_SIZE);
-            if (unlikely(nb_rx == 0)) {
-                continue;
-            } 
-            
-            for(int i=0; i < nb_rx; i++) {
-                tmpMbuf = bufs[i];
-
-                p = PacketGetFromQueueOrAlloc();
-                if(p == NULL) {
-                    SCReturnInt(1);
-                }
-
-                PKT_SET_SRC(p, PKT_SRC_WIRE);
-                p->datalink = LINKTYPE_ETHERNET;
-                gettimeofday(&p->ts, NULL);
-//                p->DpdkMBufPtr = bufs + (i * sizeof(struct rte_mbuf *));
-                p->DpdkMBufPtr = bufs;
-                
-		pktAddress = tmpMbuf->buf_addr + rte_pktmbuf_headroom(tmpMbuf);
-
-                if(PacketCopyData(p, (uint8_t *)pktAddress, rte_pktmbuf_pkt_len(tmpMbuf)) == -1) {
-                    TmqhOutputPacketpool(DpdkTv->tv, p);
-                    SCReturnInt(1);
-                }
-
-                if(TmThreadsSlotProcessPkt(DpdkTv->tv, DpdkTv->slot, p) != TM_ECODE_OK) {
-                    TmqhOutputPacketpool(DpdkTv->tv, p);
-                    SCReturnInt(1);
-                }
-
-                DpdkTv->bytes += rte_pktmbuf_pkt_len(tmpMbuf);
-                //rte_pktmbuf_free(tmpMbuf);
-            }
-            //free pool rte_pktmbuf_free
-           
- 	    for(int i = 0; i<nb_rx; i++) {
-	    	rte_pktmbuf_free(bufs[i]);
-	    }
-
-	     DpdkTv->pkts += nb_rx;
-             
-
-            /* --------------------- BYPASS mode --------------------- */
-            /* Send burst of TX packets. */
-            // const uint16_t nb_tx = rte_eth_tx_burst(port, 0,
-            //         bufs, 1);
-            // /* Free any unsent packets. */
-            // if (unlikely(nb_tx < nb_rx)) {
-            //     uint16_t buf;
-            //     for (buf = nb_tx; buf < nb_rx; buf++)
-            //         rte_pktmbuf_free(bufs[buf]);
-            // }
-            /* --------------------------------- --------------------- */
+        /* Get burst of RX packets. */
+        struct rte_mbuf *bufs[BURST_SIZE];
+        if (dpdk_config->mode == NATIVE_RING_MODE) {
+            nb_rx = rte_ring_dequeue_burst(dpdk_config->rx_rings[DpdkTv->queue_num], (void **) bufs, BURST_SIZE, NULL);
+            //nb_tx = rte_ring_enqueue_burst(dpdk_config->tx_rings[DpdkTv->queue_num], (void **) bufs, nb_rx, NULL); //todo
+        } else {
+            nb_rx = rte_eth_rx_burst(dpdk_config->port_id, DpdkTv->queue_num, bufs, BURST_SIZE);
         }
+        
+        if (unlikely(nb_rx == 0)) {
+            continue;
+        } 
+       
+        for(int i=0; i < nb_rx; i++) {
+            tmpMbuf = bufs[i];
+
+            p = PacketGetFromQueueOrAlloc();
+            if(p == NULL) {
+                SCLogError(SC_ERR_MEM_ALLOC, "Failed to get Packet Buffer for DPDK mbuff!");
+                SCReturnInt(1);
+            }
+
+            PKT_SET_SRC(p, PKT_SRC_WIRE);
+            p->datalink = LINKTYPE_ETHERNET;
+            gettimeofday(&p->ts, NULL);
+//                p->DpdkMBufPtr = bufs + (i * sizeof(struct rte_mbuf *));
+            p->DpdkMBufPtr = bufs;
+            
+            pktAddress = tmpMbuf->buf_addr + rte_pktmbuf_headroom(tmpMbuf);
+
+            if(PacketCopyData(p, (uint8_t *)pktAddress, rte_pktmbuf_data_len(tmpMbuf)) == -1) {
+                TmqhOutputPacketpool(DpdkTv->tv, p);
+                SCReturnInt(1);
+            }
+
+            if(TmThreadsSlotProcessPkt(DpdkTv->tv, DpdkTv->slot, p) != TM_ECODE_OK) {
+                TmqhOutputPacketpool(DpdkTv->tv, p);
+                SCReturnInt(1);
+            }
+
+            DpdkTv->bytes += rte_pktmbuf_pkt_len(tmpMbuf);
+        }
+        
+        for(int i = 0; i<nb_rx; i++) {
+            rte_pktmbuf_free(bufs[i]);
+        }
+
+        // uint16_t i;
+		// for (i = nb_tx; i < nb_rx; ++i)
+		// 	rte_pktmbuf_free(bufs[i]);
+
+        DpdkTv->pkts += nb_rx;
     }
 
     SCReturnInt(TM_ECODE_OK);
@@ -245,7 +436,7 @@ void ReceiveDpdkThreadExitStats(ThreadVars *tv, void *data)
     SCEnter();
     DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
 
-    SCLogNotice("(%s): Received -- pkts %" PRIu64 ", bytes %" PRIu64 "",
+    SCLogNotice("(%s): Received -- pkts: %" PRIu64 ", bytes %" PRIu64 "",
               tv->name,
               DpdkTv->pkts,
               DpdkTv->bytes);
@@ -326,21 +517,20 @@ TmEcode VerdictDpdkInit(ThreadVars *tv, const void *initdata, void **data)
     //*data = (void *)receiveSlot->slot_da;
 
     DpdkIfaceConfig *aconf = (DpdkIfaceConfig *)initdata;
-    DpdkTheadVars *DpdkTv = SCMalloc(sizeof(DpdkTheadVars));
-    if (unlikely(DpdkTv == NULL)) {
-        SCReturnInt(TM_ECODE_FAILED);
-    }
-    memset(DpdkTv, 0, sizeof(DpdkTheadVars));
+    // DpdkTheadVars *DpdkTv = SCMalloc(sizeof(DpdkTheadVars));
+    // if (unlikely(DpdkTv == NULL)) {
+    //     SCReturnInt(TM_ECODE_FAILED);
+    // }
+    // memset(DpdkTv, 0, sizeof(DpdkTheadVars));
     
-    DpdkTv->tv = tv;
+    DpdkTheadVars *DpdkTv = &dpdk_th_vars[aconf->queue_num];
+    // DpdkTv->tv = tv;
     DpdkTv->accepted = 0;
     DpdkTv->dropped = 0;
     //rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
     //DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
-    DpdkTv->livedev = aconf->live_dev;
-    DpdkTv->queue_num = aconf->queue_num;
-
-
+    //DpdkTv->livedev = aconf->live_dev;
+    // DpdkTv->queue_num = aconf->queue_num;
     *data = (void *)DpdkTv;
 
     SCReturnInt(TM_ECODE_OK);
@@ -357,6 +547,7 @@ TmEcode DPDKSetVerdict(ThreadVars *tv, DpdkTheadVars *DpdkTv, Packet *p)
 {
     SCEnter();
     uint16_t port;
+    uint16_t nb_tx;
     //struct rte_mbuf *m;
 
     if (PACKET_TEST_ACTION(p, ACTION_DROP)) {
@@ -364,9 +555,14 @@ TmEcode DPDKSetVerdict(ThreadVars *tv, DpdkTheadVars *DpdkTv, Packet *p)
     } else {
         (DpdkTv->accepted)++;
 
+       
         /* Send processing packet. */
         //RTE_ETH_FOREACH_DEV(port) {
-        const uint16_t nb_tx = rte_eth_tx_burst(0, DpdkTv->queue_num, p->DpdkMBufPtr, 1);
+        if (dpdk_config->mode == NATIVE_RING_MODE) {
+            nb_tx = rte_ring_enqueue_burst(dpdk_config->tx_rings[DpdkTv->queue_num], (void**)p->DpdkMBufPtr, 1, NULL);
+        } else {
+            nb_tx = rte_eth_tx_burst(dpdk_config->port_id, DpdkTv->queue_num, p->DpdkMBufPtr, 1);
+        }
 //        SCLogNotice("nv_tx: %d\n", nb_tx);
             //const uint16_t nb_tx = rte_eth_tx_burst(port, DpdkTv->queue_num, p->DpdkMBufPtr, 1);
             /* Free any unsent packets. */
@@ -388,6 +584,7 @@ TmEcode VerdictDpdk(ThreadVars *tv, Packet *p, void *data, PacketQueue *pq,
     SCEnter();
 
     TmEcode retval = TM_ECODE_OK;
+    //SCReturnInt(retval); // todo
     DpdkTheadVars *DpdkTv = (DpdkTheadVars *)data;
 
     /* can't verdict a "fake" packet */

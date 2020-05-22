@@ -56,6 +56,8 @@
 #include <rte_tailq.h>
 #include <rte_cfgfile.h>    // rte_cfgfile, 
 #include <rte_hexdump.h>
+#include <rte_ring.h>
+#include <rte_eth_ring.h>
 #endif
 
 #endif

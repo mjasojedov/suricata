@@ -2821,7 +2821,6 @@ static int PostConfLoadedSetup(SCInstance *suri)
         }
     }
 
-
     if (ConfigGetCaptureValue(suri) != TM_ECODE_OK) {
         SCReturnInt(TM_ECODE_FAILED);
     }
@@ -2830,13 +2829,18 @@ static int PostConfLoadedSetup(SCInstance *suri)
     if (suri->run_mode == RUNMODE_NFQ)
         NFQInitConfig(FALSE);
 #endif
+
 #ifdef HAVE_DPDK
     if (suri->run_mode == RUNMODE_DPDK) {
-        if(RegisterDpdkPort() != TM_ECODE_OK) {
+        SCLogInfo("xxx postConfig XXX");
+        if (DPDKInitConfig() != EXIT_SUCCESS) {
+            //error
             SCReturnInt(TM_ECODE_FAILED);
         }
+        DPDKAllocateThreadVars();
     }
 #endif
+
     /* Load the Host-OS lookup. */
     SCHInfoLoadFromConfig();
 
@@ -3041,7 +3045,9 @@ int main(int argc, char **argv)
 
 #ifdef HAVE_DPDK
     int retval;
-    rte_log_set_global_level(RTE_LOG_WARNING);
+    //rte_log_set_global_level(RTE_LOG_EMERG);
+
+    /* Initialize the DPDK EAL. */
     if((retval = rte_eal_init(argc, (char **)argv)) == -1) {
         SCLogError(SC_ERR_INITIALIZATION, "DPDK EAL initialization error");
         return EXIT_FAILURE;
@@ -3073,7 +3079,7 @@ int main(int argc, char **argv)
     if (LoadYamlConfig(&suricata) != TM_ECODE_OK) {
         exit(EXIT_FAILURE);
     }
-
+    
     if (suricata.run_mode == RUNMODE_DUMP_CONFIG) {
         ConfDump();
         exit(EXIT_SUCCESS);
@@ -3094,7 +3100,7 @@ int main(int argc, char **argv)
 
     LogVersion(&suricata);
     UtilCpuPrintSummary();
-
+    
     if (ParseInterfacesList(suricata.aux_run_mode, suricata.pcap_dev) != TM_ECODE_OK) {
         exit(EXIT_FAILURE);
     }

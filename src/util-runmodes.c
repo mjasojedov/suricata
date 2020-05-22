@@ -26,6 +26,7 @@
 
 #ifdef HAVE_DPDK
 #include "rte_ethdev.h"
+#include "rte_lcore.h"
 #endif
 
 #include "suricata-common.h"
@@ -619,13 +620,14 @@ int RunModeSetIPSWorker(ConfigIPSParserFunc ConfigParser,
 #ifdef HAVE_DPDK
     char *device_name;
     if(suricata.run_mode == RUNMODE_DPDK) {
-        device_name = LiveGetDeviceName(0);
-        LiveDevice *live_device = LiveGetDevice(device_name);
-        nqueue = live_device->queues_count;
+        // device_name = LiveGetDeviceName(0);
+        // LiveDevice *live_device = LiveGetDevice(device_name);
+        // nqueue = live_device->queues_count;
+        nqueue = rte_lcore_count();
     }
 #endif
     //nqueue = 5;
-
+   
     for (int i = 0; i < nqueue; i++) {
         /* create the threads */
         cur_queue = LiveGetDeviceName(i);

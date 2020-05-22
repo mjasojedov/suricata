@@ -42,10 +42,10 @@ void RunModeDpdkRegister(void)
 void *DPDKGetThread(int number)
 {
     DpdkIfaceConfig *aconf = SCMalloc(sizeof(*aconf));
-    const char *live_dev = LiveGetDeviceName(0);
+    //const char *live_dev = LiveGetDeviceName(0);
     
     aconf->queue_num = number;
-    aconf->live_dev = LiveGetDevice((char *)live_dev);
+    //aconf->live_dev = LiveGetDevice((char *)live_dev);
     
     return (void *)aconf;
 }

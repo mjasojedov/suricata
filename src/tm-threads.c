@@ -1895,6 +1895,9 @@ TmEcode TmThreadSpawn(ThreadVars *tv)
 
     TmThreadWaitForFlag(tv, THV_INIT_DONE | THV_RUNNING_DONE);
 
+    // rte_eal_mp_remote_launch(tv->tm_func, (void *)tv, CALL_MASTER);
+	// rte_eal_mp_wait_lcore();
+
     TmThreadAppend(tv, tv->type);
     return TM_ECODE_OK;
 }
