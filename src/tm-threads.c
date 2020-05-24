@@ -43,6 +43,10 @@
 #include "util-signal.h"
 #include "queue.h"
 
+#ifdef HAVE_DPDK
+#include "rte_launch.h"
+#endif
+
 #ifdef PROFILE_LOCKING
 __thread uint64_t mutex_lock_contention;
 __thread uint64_t mutex_lock_wait_ticks;
@@ -401,12 +405,12 @@ static void *TmThreadsSlotPktAcqLoop(void *td)
     tv->stream_pq = NULL;
     SCLogDebug("%s ending", tv->name);
     TmThreadsSetFlag(tv, THV_CLOSED);
-    pthread_exit((void *) 0);
+    //pthread_exit((void *) 0);
     return NULL;
 
 error:
     tv->stream_pq = NULL;
-    pthread_exit((void *) -1);
+    //pthread_exit((void *) -1);
     return NULL;
 }
 
@@ -1511,7 +1515,13 @@ static int TmThreadKillThread(ThreadVars *tv)
     }
 
     /* join it and flag it as dead */
-    pthread_join(tv->t, NULL);
+    //pthread_join(tv->t, NULL);
+    if (tv->type == TVT_PPT) {
+        rte_eal_wait_lcore(tv->lcore_id);
+    } else {
+        pthread_join(tv->t, NULL);
+    }
+
     SCLogDebug("thread %s stopped", tv->name);
     TmThreadsSetFlag(tv, THV_DEAD);
     return 1;
@@ -1896,7 +1906,23 @@ TmEcode TmThreadSpawn(ThreadVars *tv)
     TmThreadWaitForFlag(tv, THV_INIT_DONE | THV_RUNNING_DONE);
 
     // rte_eal_mp_remote_launch(tv->tm_func, (void *)tv, CALL_MASTER);
-	// rte_eal_mp_wait_lcore();
+	//rte_eal_mp_wait_lcore();
+
+    TmThreadAppend(tv, tv->type);
+    return TM_ECODE_OK;
+}
+
+TmEcode TmThreadSpawnDpdk(ThreadVars *tv, unsigned lcore_id)
+{
+    if (tv->tm_func == NULL) {
+        printf("ERROR: no thread function set\n");
+        return TM_ECODE_FAILED;
+    }
+
+    #ifdef HAVE_DPDK
+        rte_eal_remote_launch(tv->tm_func, (void *)tv, lcore_id);
+        //rte_eal_wait_lcore(tv->lcore_id);
+    #endif
 
     TmThreadAppend(tv, tv->type);
     return TM_ECODE_OK;

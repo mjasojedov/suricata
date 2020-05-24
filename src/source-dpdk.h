@@ -3,6 +3,7 @@
 
 int DPDKInitConfig(void);
 void DPDKAllocateThreadVars(void);
+void DpdkClean(void);
 
 void TmModuleReceiveDpdkRegister(void);
 void TmModuleDecodeDpdkRegister(void);

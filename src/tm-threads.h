@@ -108,6 +108,7 @@ ThreadVars *TmThreadCreateMgmtThreadByName(const char *name, const char *module,
 ThreadVars *TmThreadCreateCmdThreadByName(const char *name, const char *module,
                                      int mucond);
 TmEcode TmThreadSpawn(ThreadVars *);
+TmEcode TmThreadSpawnDpdk(ThreadVars *tv, unsigned lcore_id);
 void TmThreadSetFlags(ThreadVars *, uint8_t);
 void TmThreadKillThreadsFamily(int family);
 void TmThreadKillThreads(void);

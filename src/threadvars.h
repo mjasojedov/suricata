@@ -68,6 +68,10 @@ typedef struct ThreadVars_ {
     /** local id */
     int id;
 
+    /** For DPDK run */
+    unsigned lcore_id;
+    unsigned ring_id;
+    
     /** queue's */
     Tmq *inq;
     Tmq *outq;

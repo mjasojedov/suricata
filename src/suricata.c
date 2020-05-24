@@ -2403,6 +2403,12 @@ void PostRunDeinit(const int runmode, struct timeval *start_time)
         SCProfilingDump();
     SCProfilingDestroy();
 #endif
+
+#ifdef HAVE_DPDK
+    rte_eal_mp_wait_lcore();
+    DpdkClean();
+#endif
+
 }
 
 
@@ -3129,6 +3135,8 @@ int main(int argc, char **argv)
     if (suricata.run_mode != RUNMODE_UNIX_SOCKET) {
         UnixManagerThreadSpawnNonRunmode();
     }
+
+    SleepMsec(10000);
 
     /* Wait till all the threads have been initialized */
     if (TmThreadWaitOnThreadInit() == TM_ECODE_FAILED) {
