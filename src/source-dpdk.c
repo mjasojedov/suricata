@@ -62,6 +62,13 @@ typedef struct DpdkTheadVars_
 
     uint16_t queue_num;
 
+    struct rte_mbuf *ReceivedMbufs[BURST_SIZE];
+    struct rte_mbuf *AcceptedMbufs[BURST_SIZE];
+    struct rte_mbuf *DeclinedMbufs[BURST_SIZE];
+
+    int AcceptedIndex;
+    int DeclinedIndex;
+
     ThreadVars *tv;
     TmSlot *slot;
     /* If possible livedevice the capture thread is rattached to. */
@@ -132,7 +139,7 @@ int DPDKInitConfig(void)
 
     if (dpdk_config->mode == ETHDEV_RING_MODE || dpdk_config->mode == NATIVE_RING_MODE) {
 		uint16_t i;
-		for (i = 0; i < dpdk_config->nb_queues; i++) {
+		for (i = 0; i < dpdk_config->nb_queues; i++) { // todo nb_queue-1
 			char name[64];
 
 			snprintf(name, sizeof(name), "port_%s_tx%" PRIu16, dpdk_config->port_name, i);
@@ -212,7 +219,7 @@ int DPDKInitConfig(void)
 
 void DPDKAllocateThreadVars(void)
 {
-    void *ptr = SCRealloc(dpdk_th_vars, (rte_lcore_count() - 1) * sizeof(DpdkTheadVars));
+    void *ptr = SCRealloc(dpdk_th_vars, (rte_lcore_count() - 1) * sizeof(DpdkTheadVars)); // todo Malloc
     if (ptr == NULL) {
         SCLogError(SC_ERR_MEM_ALLOC, "Unable to allocate DPDKThreadVars");
         DPDKContextsClean();
@@ -392,7 +399,7 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
         // }
     
         /** works **/
-        nb_rx = rte_ring_dequeue_burst(rx_ring, (void **) bufs, BURST_SIZE, NULL);
+        nb_rx = rte_ring_dequeue_burst(rx_ring, (void **) DpdkTv->ReceivedMbufs, BURST_SIZE, NULL);
         //nb_tx = rte_ring_enqueue_burst(tx_ring, (void **) bufs, nb_rx, NULL);
 
         if (unlikely(nb_rx == 0)) {
@@ -400,7 +407,7 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
         } 
 
         for(int i=0; i < nb_rx; i++) {
-            tmpMbuf = bufs[i];
+            tmpMbuf = DpdkTv->ReceivedMbufs[i];
             p = PacketGetFromQueueOrAlloc();
             if(p == NULL) {
                 SCLogError(SC_ERR_MEM_ALLOC, "Failed to get Packet Buffer for DPDK mbuff!");
@@ -409,8 +416,7 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
             PKT_SET_SRC(p, PKT_SRC_WIRE);
             p->datalink = LINKTYPE_ETHERNET;
             gettimeofday(&p->ts, NULL);
-            // p->DpdkMBufPtr = bufs + (i * sizeof(struct rte_mbuf *));
-            p->DpdkMBufPtr = bufs;
+            p->mbufIndex = i;
             pktAddress = tmpMbuf->buf_addr + rte_pktmbuf_headroom(tmpMbuf);
             if(PacketCopyData(p, (uint8_t *)pktAddress, rte_pktmbuf_pkt_len(tmpMbuf)) == -1) {
                 TmqhOutputPacketpool(DpdkTv->tv, p);
@@ -422,15 +428,21 @@ TmEcode ReceiveDpdkLoop(ThreadVars *tv, void *data, void *slot)
             }
             DpdkTv->bytes += rte_pktmbuf_pkt_len(tmpMbuf);
             
-            rte_pktmbuf_free(tmpMbuf);
         }
     
         DpdkTv->pkts += nb_rx;
 
-        /** works **/
-        // uint16_t i;
-		// for (i = nb_tx; i < nb_rx; ++i)
-		// 	rte_pktmbuf_free(bufs[i]);
+        nb_tx = rte_ring_enqueue_burst(tx_ring, (void**)DpdkTv->AcceptedMbufs, DpdkTv->AccptedIndex, NULL);
+
+        /** Cleaning rings... **/
+		for (int i = nb_tx; i < DpdkTv->AcceptedIndex; ++i)
+			rte_pktmbuf_free(DpdkTv->AcceptedMbufs[i]);
+
+        for (int i = 0; i < DpdkTv->DeclinedIndex; ++i)
+			rte_pktmbuf_free(DpdkTv->DeclinedMbufs[i]);
+
+        DpdkTv->AcceptedIndex = 0;
+        DpdkTv->DeclinedIndex = 0;
 
         // for(int i = 0; i<nb_rx; i++) {
         //     rte_pktmbuf_free(bufs[i]);
@@ -537,6 +549,8 @@ TmEcode VerdictDpdkInit(ThreadVars *tv, const void *initdata, void **data)
     DpdkTheadVars *DpdkTv = &dpdk_th_vars[tv->ring_id];
     DpdkTv->accepted = 0;
     DpdkTv->dropped = 0;
+    DpdkTv->AcceptedIndex = 0;
+    DpdkTv->DeclinedIndex = 0;
     //rte_eth_dev_get_name_by_port(0, (char *)DpdkTv->port); //todo
     //DpdkTv->livedev = LiveGetDevice(DpdkTv->port);
     //DpdkTv->livedev = aconf->live_dev;
@@ -559,20 +573,23 @@ TmEcode DPDKSetVerdict(ThreadVars *tv, DpdkTheadVars *DpdkTv, Packet *p)
     uint16_t port;
     uint16_t nb_tx;
     //struct rte_mbuf *m;
+    //struct rte_ring *tx_ring = dpdk_config->tx_rings[tv->ring_id];
 
     if (PACKET_TEST_ACTION(p, ACTION_DROP)) {
         (DpdkTv->dropped)++;
+        DpdkTv->DeclinedMbufs[(DpdkTv->DeclinedIndex)++] = DpdkTv->ReceivedMbufs[p->mbufIndex]; 
     } else {
         (DpdkTv->accepted)++;
 
-       
+        DpdkTv->AcceptedMbufs[(DpdkTv->AcceptedIndex)++] = DpdkTv->ReceivedMbufs[p->mbufIndex];
+        
         /* Send processing packet. */
-        //RTE_ETH_FOREACH_DEV(port) {
-        if (dpdk_config->mode == NATIVE_RING_MODE) {
-            nb_tx = rte_ring_enqueue_burst(dpdk_config->tx_rings[DpdkTv->queue_num], (void**)p->DpdkMBufPtr, 1, NULL);
-        } else {
-            nb_tx = rte_eth_tx_burst(dpdk_config->port_id, DpdkTv->queue_num, p->DpdkMBufPtr, 1);
-        }
+        // //RTE_ETH_FOREACH_DEV(port) {
+        // if (dpdk_config->mode == NATIVE_RING_MODE) {
+        //     nb_tx = rte_ring_enqueue_burst(tx_ring, (void**)p->DpdkMBufPtr, 1, NULL);
+        // } else {
+        //     nb_tx = rte_eth_tx_burst(dpdk_config->port_id, DpdkTv->queue_num, p->DpdkMBufPtr, 1);
+        // }
 //        SCLogNotice("nv_tx: %d\n", nb_tx);
             //const uint16_t nb_tx = rte_eth_tx_burst(port, DpdkTv->queue_num, p->DpdkMBufPtr, 1);
             /* Free any unsent packets. */

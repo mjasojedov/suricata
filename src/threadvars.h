@@ -71,6 +71,7 @@ typedef struct ThreadVars_ {
     /** For DPDK run */
     unsigned lcore_id;
     unsigned ring_id;
+    struct rte_mbuf **actualPacket;
     
     /** queue's */
     Tmq *inq;

@@ -607,6 +607,7 @@ typedef struct Packet_
 #endif
 #ifdef HAVE_DPDK
     struct rte_mbuf **DpdkMBufPtr;
+    int mbufIndex;
 #endif
 } Packet;
 

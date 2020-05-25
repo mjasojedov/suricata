@@ -3136,7 +3136,7 @@ int main(int argc, char **argv)
         UnixManagerThreadSpawnNonRunmode();
     }
 
-    SleepMsec(10000);
+    SleepMsec(5000);
 
     /* Wait till all the threads have been initialized */
     if (TmThreadWaitOnThreadInit() == TM_ECODE_FAILED) {
