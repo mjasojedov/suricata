@@ -546,7 +546,7 @@ suricata_DEPENDENCIES = $(RUST_SURICATA_LIB)
 
 # default CFLAGS
 AM_CFLAGS = ${OPTIMIZATION_CFLAGS} ${GCC_CFLAGS} ${CLANG_CFLAGS}            \
-    ${SECCFLAGS} ${PCAP_CFLAGS} ${DPDK_CFLAGS}	                            \ 
+    ${SECCFLAGS} ${PCAP_CFLAGS} ${DPDK_CFLAGS}	                            \
     -DLOCAL_STATE_DIR=\"$(localstatedir)\"                                  \
     -std=gnu99                                                              \
     -Wall -Wno-unused-parameter -Wmissing-prototypes -Wmissing-declarations \

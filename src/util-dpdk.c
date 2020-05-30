@@ -96,7 +96,8 @@ int DpdkPortInit_new(int port, struct rte_mempool *mbuf_pool, uint16_t nb_queues
     // }
 
     // rte_eth_promiscuous_enable(port);
-    
+
+    struct rte_eth_dev_info dev_info;
     struct rte_eth_conf port_conf = {
 		.rxmode = {
 			.mq_mode = ETH_MQ_RX_NONE,
@@ -114,6 +115,11 @@ int DpdkPortInit_new(int port, struct rte_mempool *mbuf_pool, uint16_t nb_queues
 	if (!rte_eth_dev_is_valid_port(port))
 		return -1;
 
+    rte_eth_dev_info_get(port, &dev_info);
+    if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE) {
+        port_conf.txmode.offloads |= DEV_TX_OFFLOAD_MBUF_FAST_FREE;
+    }
+
 	retval = rte_eth_dev_configure(port, nb_queues, nb_queues, &port_conf);
 	if (retval != 0)
 		return retval;
@@ -130,6 +136,8 @@ int DpdkPortInit_new(int port, struct rte_mempool *mbuf_pool, uint16_t nb_queues
 			return retval;
 	}
 
+    // txconf = dev_info.default_txconf;
+	// txconf.offloads = port_conf.txmode.offloads;
 	for (q_id = 0; q_id < nb_queues; q_id++) {
 		retval = rte_eth_tx_queue_setup(port, q_id, nb_txd, socket_id, NULL);
 		if (retval < 0)

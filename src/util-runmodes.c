@@ -718,7 +718,7 @@ int RunModeSetIPSWorker(ConfigIPSParserFunc ConfigParser,
             exit(EXIT_FAILURE);
         }
         tv->lcore_id = lcore_id;
-        tv->ring_id = ring_id; // todo ring_id++
+        tv->ring_id = ring_id;
 
         tm_module = TmModuleGetByName(recv_mod_name);
         if (tm_module == NULL) {

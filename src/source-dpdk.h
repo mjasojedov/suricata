@@ -9,4 +9,6 @@ void TmModuleReceiveDpdkRegister(void);
 void TmModuleDecodeDpdkRegister(void);
 void TmModuleVerdictDpdkRegister(void);
 
+
+void run_dpdk_bypass(void);
 #endif /* __SOURCE_DPDK_H__ */
