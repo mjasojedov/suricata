@@ -387,11 +387,6 @@ int RunModeSetLiveCaptureWorkers(ConfigIfaceParserFunc ConfigParser,
                               const char *live_dev)
 {
     int nlive = LiveGetDeviceCount();
-// #ifdef HAVE_DPDK
-//     if(suricata.run_mode == RUNMODE_DPDK) {
-//         nlive = rte_eth_dev_count_avail();
-//     }
-// #endif
     void *aconf;
     int ldev;
 
@@ -614,159 +609,142 @@ int RunModeSetIPSWorker(ConfigIPSParserFunc ConfigParser,
     ThreadVars *tv = NULL;
     TmModule *tm_module = NULL;
     const char *cur_queue = NULL;
-
-
     int nqueue = LiveGetDeviceCount();
-#ifdef HAVE_DPDK
-    char *device_name;
-    if(suricata.run_mode == RUNMODE_DPDK) {
-        // device_name = LiveGetDeviceName(0);
-        // LiveDevice *live_device = LiveGetDevice(device_name);
-        // nqueue = live_device->queues_count;
-        nqueue = rte_lcore_count();
-    }
+
+    if (suricata.run_mode != RUNMODE_DPDK) {
+        for (int i = 0; i < nqueue; i++) {
+            /* create the threads */
+            cur_queue = LiveGetDeviceName(i);
+            if (cur_queue == NULL) {
+                SCLogError(SC_ERR_RUNMODE, "invalid queue number");
+                exit(EXIT_FAILURE);
+            }
+            memset(tname, 0, sizeof(tname));
+            snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, cur_queue);
+            
+            tv = TmThreadCreatePacketHandler(tname,
+                    "packetpool", "packetpool",
+                    "packetpool", "packetpool",
+                    "pktacqloop");
+            if (tv == NULL) {
+                SCLogError(SC_ERR_THREAD_CREATE, "TmThreadsCreate failed");
+                exit(EXIT_FAILURE);
+            }
+
+            tm_module = TmModuleGetByName(recv_mod_name);
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_INVALID_VALUE, "TmModuleGetByName failed for %s", recv_mod_name);
+                exit(EXIT_FAILURE);
+            }
+            TmSlotSetFuncAppend(tv, tm_module, (void *) ConfigParser(i));
+
+            tm_module = TmModuleGetByName(decode_mod_name);
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_INVALID_VALUE, "TmModuleGetByName %s failed", decode_mod_name);
+                exit(EXIT_FAILURE);
+            }
+            TmSlotSetFuncAppend(tv, tm_module, NULL);
+
+            tm_module = TmModuleGetByName("FlowWorker");
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName for FlowWorker failed");
+                exit(EXIT_FAILURE);
+            }
+            TmSlotSetFuncAppend(tv, tm_module, NULL);
+
+            tm_module = TmModuleGetByName(verdict_mod_name);
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName %s failed", verdict_mod_name);
+                exit(EXIT_FAILURE);
+            }
+
+            TmSlotSetFuncAppend(tv, tm_module, (void *) ConfigParser(i));
+
+            tm_module = TmModuleGetByName("RespondReject");
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName for RespondReject failed");
+                exit(EXIT_FAILURE);
+            }
+            TmSlotSetFuncAppend(tv, tm_module, NULL);
+
+            TmThreadSetCPU(tv, WORKER_CPU_SET);
+
+            if (TmThreadSpawn(tv) != TM_ECODE_OK) {
+                SCLogError(SC_ERR_RUNMODE, "TmThreadSpawn failed");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+    } else {
+#ifndef HAVE_DPDK
+        SCLogError(SC_ERR_RUNMODE, "Runmode DPDK selected, but not enabled during build. "
+                                   "See './configure --help' option '--enable-dpdk'.");
+        exit(EXIT_FAILURE);
+#else
+        unsigned lcore_id;
+        unsigned ring_id = 0;
+        SCLogNotice("Creating DPDK threads. Please wait...");
+        RTE_LCORE_FOREACH_SLAVE(lcore_id) {
+            memset(tname, 0, sizeof(tname));
+            if(suricata.run_mode == RUNMODE_DPDK) {
+                snprintf(tname, sizeof(tname), "%s-DPDK#%d", thread_name_workers, lcore_id);
+            } 
+            tv = TmThreadCreatePacketHandler(tname,
+                    "packetpool", "packetpool",
+                    "packetpool", "packetpool",
+                    "pktacqloop");
+            if (tv == NULL) {
+                SCLogError(SC_ERR_THREAD_CREATE, "TmThreadsCreate failed");
+                exit(EXIT_FAILURE);
+            }
+            tv->lcore_id = lcore_id;
+            tv->ring_id = ring_id++;
+
+            tm_module = TmModuleGetByName(recv_mod_name);
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_INVALID_VALUE, "TmModuleGetByName failed for %s", recv_mod_name);
+                exit(EXIT_FAILURE);
+            }
+            TmSlotSetFuncAppend(tv, tm_module, (void *) ConfigParser(lcore_id));
+
+            tm_module = TmModuleGetByName(decode_mod_name);
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_INVALID_VALUE, "TmModuleGetByName %s failed", decode_mod_name);
+                exit(EXIT_FAILURE);
+            }
+            TmSlotSetFuncAppend(tv, tm_module, NULL);
+
+            tm_module = TmModuleGetByName("FlowWorker");
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName for FlowWorker failed");
+                exit(EXIT_FAILURE);
+            }
+            TmSlotSetFuncAppend(tv, tm_module, NULL);
+
+            tm_module = TmModuleGetByName(verdict_mod_name);
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName %s failed", verdict_mod_name);
+                exit(EXIT_FAILURE);
+            }
+
+            TmSlotSetFuncAppend(tv, tm_module, (void *) ConfigParser(lcore_id));
+
+            tm_module = TmModuleGetByName("RespondReject");
+            if (tm_module == NULL) {
+                SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName for RespondReject failed");
+                exit(EXIT_FAILURE);
+            }
+            TmSlotSetFuncAppend(tv, tm_module, NULL);
+
+            TmThreadSetCPU(tv, WORKER_CPU_SET);
+
+            if (TmThreadSpawnDpdk(tv, lcore_id) != TM_ECODE_OK) {
+                SCLogError(SC_ERR_RUNMODE, "TmThreadSpawnDpdk failed");
+                exit(EXIT_FAILURE);
+            }
+        }
 #endif
-    //nqueue = 5;
-   
-    // for (int i = 0; i < nqueue; i++) {
-    //     /* create the threads */
-    //     cur_queue = LiveGetDeviceName(i);
-    //     // if (cur_queue == NULL) {
-    //     //     SCLogError(SC_ERR_RUNMODE, "invalid queue number");
-    //     //     exit(EXIT_FAILURE);
-    //     // }
-    //     memset(tname, 0, sizeof(tname));
-    //     if(suricata.run_mode == RUNMODE_DPDK) {
-    //         snprintf(tname, sizeof(tname), "%s-DPDK#%d", thread_name_workers, i);
-    //     } else {
-    //         snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, cur_queue);
-    //     }
-    //     // snprintf(tname, sizeof(tname), "%s-%s", thread_name_workers, cur_queue);
-    //     tv = TmThreadCreatePacketHandler(tname,
-    //             "packetpool", "packetpool",
-    //             "packetpool", "packetpool",
-    //             "pktacqloop");
-    //     if (tv == NULL) {
-    //         SCLogError(SC_ERR_THREAD_CREATE, "TmThreadsCreate failed");
-    //         exit(EXIT_FAILURE);
-    //     }
-    //     tv->lcore_id = i;
-
-    //     tm_module = TmModuleGetByName(recv_mod_name);
-    //     if (tm_module == NULL) {
-    //         SCLogError(SC_ERR_INVALID_VALUE, "TmModuleGetByName failed for %s", recv_mod_name);
-    //         exit(EXIT_FAILURE);
-    //     }
-    //     TmSlotSetFuncAppend(tv, tm_module, (void *) ConfigParser(i));
-
-    //     tm_module = TmModuleGetByName(decode_mod_name);
-    //     if (tm_module == NULL) {
-    //         SCLogError(SC_ERR_INVALID_VALUE, "TmModuleGetByName %s failed", decode_mod_name);
-    //         exit(EXIT_FAILURE);
-    //     }
-    //     TmSlotSetFuncAppend(tv, tm_module, NULL);
-
-    //     tm_module = TmModuleGetByName("FlowWorker");
-    //     if (tm_module == NULL) {
-    //         SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName for FlowWorker failed");
-    //         exit(EXIT_FAILURE);
-    //     }
-    //     TmSlotSetFuncAppend(tv, tm_module, NULL);
-
-    //     tm_module = TmModuleGetByName(verdict_mod_name);
-    //     if (tm_module == NULL) {
-    //         SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName %s failed", verdict_mod_name);
-    //         exit(EXIT_FAILURE);
-    //     }
-
-    //     TmSlotSetFuncAppend(tv, tm_module, (void *) ConfigParser(i));
-
-    //     tm_module = TmModuleGetByName("RespondReject");
-    //     if (tm_module == NULL) {
-    //         SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName for RespondReject failed");
-    //         exit(EXIT_FAILURE);
-    //     }
-    //     TmSlotSetFuncAppend(tv, tm_module, NULL);
-
-    //     TmThreadSetCPU(tv, WORKER_CPU_SET);
-
-    //     SCLogNotice("Creating DPDK thread...");
-    //     if (TmThreadSpawnDpdk(tv) != TM_ECODE_OK) {
-    //         SCLogError(SC_ERR_RUNMODE, "TmThreadSpawn failed");
-    //         exit(EXIT_FAILURE);
-    //     }
-    // }
-    unsigned lcore_id;
-    unsigned ring_id = 0;
-
-    RTE_LCORE_FOREACH_SLAVE(lcore_id) {
-        cur_queue = LiveGetDeviceName(lcore_id);
-        // if (cur_queue == NULL) {
-        //     SCLogError(SC_ERR_RUNMODE, "invalid queue number");
-        //     exit(EXIT_FAILURE);
-        // }
-        memset(tname, 0, sizeof(tname));
-        if(suricata.run_mode == RUNMODE_DPDK) {
-            snprintf(tname, sizeof(tname), "%s-DPDK#%d", thread_name_workers, lcore_id);
-        } 
-        tv = TmThreadCreatePacketHandler(tname,
-                "packetpool", "packetpool",
-                "packetpool", "packetpool",
-                "pktacqloop");
-        if (tv == NULL) {
-            SCLogError(SC_ERR_THREAD_CREATE, "TmThreadsCreate failed");
-            exit(EXIT_FAILURE);
-        }
-        tv->lcore_id = lcore_id;
-        tv->ring_id = ring_id;
-
-        tm_module = TmModuleGetByName(recv_mod_name);
-        if (tm_module == NULL) {
-            SCLogError(SC_ERR_INVALID_VALUE, "TmModuleGetByName failed for %s", recv_mod_name);
-            exit(EXIT_FAILURE);
-        }
-        TmSlotSetFuncAppend(tv, tm_module, (void *) ConfigParser(lcore_id));
-
-        tm_module = TmModuleGetByName(decode_mod_name);
-        if (tm_module == NULL) {
-            SCLogError(SC_ERR_INVALID_VALUE, "TmModuleGetByName %s failed", decode_mod_name);
-            exit(EXIT_FAILURE);
-        }
-        TmSlotSetFuncAppend(tv, tm_module, NULL);
-
-        tm_module = TmModuleGetByName("FlowWorker");
-        if (tm_module == NULL) {
-            SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName for FlowWorker failed");
-            exit(EXIT_FAILURE);
-        }
-        TmSlotSetFuncAppend(tv, tm_module, NULL);
-
-        tm_module = TmModuleGetByName(verdict_mod_name);
-        if (tm_module == NULL) {
-            SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName %s failed", verdict_mod_name);
-            exit(EXIT_FAILURE);
-        }
-
-        TmSlotSetFuncAppend(tv, tm_module, (void *) ConfigParser(lcore_id));
-
-        tm_module = TmModuleGetByName("RespondReject");
-        if (tm_module == NULL) {
-            SCLogError(SC_ERR_RUNMODE, "TmModuleGetByName for RespondReject failed");
-            exit(EXIT_FAILURE);
-        }
-        TmSlotSetFuncAppend(tv, tm_module, NULL);
-
-        TmThreadSetCPU(tv, WORKER_CPU_SET);
-
-        SCLogNotice("Creating DPDK thread...");
-        if (TmThreadSpawnDpdk(tv, lcore_id) != TM_ECODE_OK) {
-            SCLogError(SC_ERR_RUNMODE, "TmThreadSpawn failed");
-            exit(EXIT_FAILURE);
-        }
-
-        ring_id++;
-    }
-
+    } 
 
     return 0;
 }

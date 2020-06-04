@@ -1,12 +1,45 @@
+/* Copyright (C) 2020 Igor Mjasojedov
+ *
+ * You can copy, redistribute or modify this Program under the terms of
+ * the GNU General Public License version 2 as published by the Free
+ * Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * version 2 along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
+ */
+
+/**
+ * \file
+ *
+ * \author Igor Mjasojedov <mjasojedov.igor13@gmail.com>
+ */
+
 #include "util-dpdk-common.h"
 #include "util-dpdk.h" 
 #include "util-runmodes.h"
 #include "runmodes.h"
 #include "runmode-dpdk.h"
-
 #include "source-nfq.h"
 
+
 static const char *default_mode = NULL;
+
+/* Prototypes */
+int RunModeDpdkSingle(void);
+int RunModeDpdkWorkers(void);
+int RunModeDpdkIpsAutoFp(void);
+int RunModeDpdkIpsWorkers(void);
+void *DPDKGetThread(int number);
+int DPDKConfigGetTheadsCount(void *arg);
+void *ParseDPDKConfig(const char *arg);
+
 
 const char *RunModeDpdkGetDefaultMode(void)
 {
@@ -15,22 +48,7 @@ const char *RunModeDpdkGetDefaultMode(void)
 
 void RunModeDpdkRegister(void)
 {
-    default_mode = "autofp";
-
-    /* ************************ IDS ************************ */
-    RunModeRegisterNewRunMode(RUNMODE_DPDK, "single", 
-                              "Single threaded DPDK mode.",
-                              RunModeDpdkSingle);
-    // RunModeRegisterNewRunMode(RUNMODE_DPDK, "workers", 
-    //                           "Workers DPDK mode, each thread does all"
-    //                           " tasks from acquisition to logging",
-    //                           RunModeDpdkWorkers);
-
-    /* ************************ IPS ************************ */
-    RunModeRegisterNewRunMode(RUNMODE_DPDK, "autofp",
-                              "Multi threaded DPDK IPS mode with"
-                              " respect to flow",
-                              RunModeDpdkIpsAutoFp);
+    default_mode = "workers";
 
     RunModeRegisterNewRunMode(RUNMODE_DPDK, "workers",
                               "Workers DPDK mode, each thread does all"
@@ -40,132 +58,9 @@ void RunModeDpdkRegister(void)
 }
 
 void *DPDKGetThread(int number)
-{
-    DpdkIfaceConfig *aconf = SCMalloc(sizeof(*aconf));
-    //const char *live_dev = LiveGetDeviceName(0);
-    
-    aconf->queue_num = number;
-    //aconf->live_dev = LiveGetDevice((char *)live_dev);
-    
-    return (void *)aconf;
-}
-
-int DPDKConfigGetTheadsCount(void *arg)
-{
-    return 1;
-}
-
-
-void *ParseDPDKConfig(const char *arg) //arg = "0000:0300.00"
-{
+{    
     return NULL;
 }
-
-
-/**
- * \brief Single thread version of the DPDK processing.
- */
-int RunModeDpdkSingle(void)
-{
-    SCEnter();
-    
-#ifdef HAVE_DPDK
-    int retval;
-    char *live_dev = NULL;
-    // const char live_dev[RTE_ETH_NAME_MAX_LEN];
-    // uint16_t port;
-
-    // RTE_ETH_FOREACH_DEV(port) {
-    //     if(rte_eth_dev_get_name_by_port(port, (char *)live_dev) != 0) {
-    //         exit(EXIT_FAILURE);
-    //     }
-    // }
-
-    RunModeInitialize();
-    TimeModeSetLive();
-
-    retval = RunModeSetLiveCaptureSingle(ParseDPDKConfig, 
-                                         DPDKConfigGetTheadsCount,
-                                         "ReceiveDPDK",
-                                         "DecodeDPDK", thread_name_single,
-                                         live_dev);
-    if (retval != 0) {
-        SCLogError(SC_ERR_RUNMODE, "Runmode start failed");
-        exit(EXIT_FAILURE);
-    }
-
-    SCLogInfo("RunModeDpdkSingle initialized");
-#endif
-
-    SCReturnInt(0);
-}
-
-/**
- * \brief Workers version of the DPDK LIVE processing.
- *
- * Start N threads with each thread doing all the work.
- *
- */
-int RunModeDpdkWorkers(void)
-{
-    SCEnter();
-    
-#ifdef HAVE_DPDK
-    int retval;
-    char *live_dev = NULL;
-    // const char live_dev[RTE_ETH_NAME_MAX_LEN];
-    // uint16_t port;
-    // RTE_ETH_FOREACH_DEV(port) {
-    //     if(rte_eth_dev_get_name_by_port(port, (char *)live_dev) != 0) {
-    //         exit(EXIT_FAILURE);
-    //     }
-    // }
-
-    RunModeInitialize();
-    TimeModeSetLive();
-
-    retval = RunModeSetLiveCaptureWorkers(ParseDPDKConfig, 
-                                          DPDKConfigGetTheadsCount,
-                                          "ReceiveDPDK",
-                                          "DecodeDPDK", thread_name_workers,
-                                          live_dev);
-    if (retval != 0) {
-        SCLogError(SC_ERR_RUNMODE, "Runmode start failed");
-        exit(EXIT_FAILURE);
-    }
-
-    SCLogInfo("RunModeDpdkWorkers initialized");
-#endif
-
-    SCReturnInt(0);
-}
-
-
-int RunModeDpdkIpsAutoFp(void)
-{
-    SCEnter();
-   
-#ifdef HAVE_DPDK
-    int retval;
-    RunModeInitialize();
-    TimeModeSetLive();
-    LiveDeviceHasNoStats();
-
-    retval = RunModeSetIPSAutoFp(DPDKGetThread,
-                                "ReceiveDPDK",
-                                "VerdictDPDK",
-                                "DecodeDPDK");
-
-    if (retval != 0) {
-        SCLogError(SC_ERR_RUNMODE, "Runmode start failed");
-        exit(EXIT_FAILURE);
-    }
-
-    SCLogInfo("RunModeDpdkIpsAutoFp initialized");
-#endif /* HAVE_DPDK */
-    SCReturnInt(0);
-}
-
 
 /**
  * \brief Workers version of the IPS DPDK LIVE processing.

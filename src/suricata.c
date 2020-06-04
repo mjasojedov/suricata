@@ -85,23 +85,16 @@
 
 #include "source-nfq.h"
 #include "source-nfq-prototypes.h"
-
 #include "source-nflog.h"
-
 #include "source-ipfw.h"
-
 #include "source-pcap.h"
 #include "source-pcap-file.h"
-
 #include "source-pfring.h"
-
 #include "source-erf-file.h"
 #include "source-erf-dag.h"
 #include "source-napatech.h"
-
 #include "source-af-packet.h"
 #include "source-netmap.h"
-
 #include "source-windivert.h"
 #include "source-windivert-prototypes.h"
 
@@ -152,9 +145,7 @@
 #include "util-profiling.h"
 #include "util-magic.h"
 #include "util-signal.h"
-
 #include "util-coredump-config.h"
-
 #include "util-decode-mime.h"
 #include "defrag.h"
 
@@ -2403,10 +2394,11 @@ void PostRunDeinit(const int runmode, struct timeval *start_time)
 #endif
 
 #ifdef HAVE_DPDK
-    rte_eal_mp_wait_lcore();
-    DpdkClean();
+    if (suricata.run_mode == RUNMODE_DPDK) {
+        rte_eal_mp_wait_lcore();
+        DpdkClean();
+    }
 #endif
-
 }
 
 
@@ -2829,12 +2821,11 @@ static int PostConfLoadedSetup(SCInstance *suri)
 
 #ifdef HAVE_DPDK
     if (suri->run_mode == RUNMODE_DPDK) {
-        SCLogInfo("xxx postConfig XXX");
-        if (DPDKInitConfig() != EXIT_SUCCESS) {
-            //error
+        if (DpdkInitConfig() != EXIT_SUCCESS) {
+            SCLogError(SC_ERR_DPDK_INIT, "DPDK inicialization unsuccessful.");
             SCReturnInt(TM_ECODE_FAILED);
         }
-        DPDKAllocateThreadVars();
+        DpdkAllocateThreadVars();
     }
 #endif
 
@@ -2986,170 +2977,6 @@ static void SuricataMainLoop(SCInstance *suri)
         usleep(10* 1000);
     }
 }
-/***************************** BYPASS *************************************/
-/**************************************************************************/
-
-// #define DEFAULT_RX_RING_SIZE 128
-// #define DEFAULT_TX_RING_SIZE 128
-
-// #define DEFAULT_MEMPOOL_SIZE 1024
-// #define DEFAULT_MEMPOOL_CACHE_SIZE 128
-// #define DEFAULT_PKT_SIZE 1518
-// #define BURST_SIZE 32
-
-// enum {
-//         ETHDEV_MODE = 0,
-//         ETHDEV_RING_MODE = 1,
-//         NATIVE_RING_MODE = 2,
-//         __MODES_COUNT,
-// };
-
-// static volatile int g_should_stop = 0;
-// static uint32_t counters[5] = {0,0,0,0,0};
-
-// static void handle_sig(int sig)
-// {
-//         switch (sig) {
-//         case SIGINT:
-//         case SIGTERM:
-//                 g_should_stop = 1;
-//                 break;
-//         }
-// }
-
-// static void handle_broken_pmd(int sig)
-// {
-// #define HINT "segfault, try --no-pci or start as root\n"
-
-//         if (sig != SIGSEGV)
-//                 return;
-
-//         write(STDERR_FILENO, HINT, sizeof(HINT) - 1);
-//         signal(sig, SIG_DFL);
-//         kill(getpid(), sig);
-// }
-
-// static int should_stop(void)
-// {
-//         return g_should_stop;
-// }
-
-// static void thread_ring_loop(struct rte_ring *rx_ring, struct rte_ring *tx_ring, uint16_t id)
-// {
-//         struct rte_mbuf *pkts[BURST_SIZE];
-//         uint16_t rx_count;
-//         uint16_t tx_count;
-
-//         while (!should_stop()) {
-//             rx_count = rte_ring_dequeue_burst(rx_ring, (void **) pkts, BURST_SIZE, NULL);
-//             //tx_count = rte_ring_enqueue_burst(tx_ring, (void **) pkts, rx_count, NULL);
-//             counters[id] += (uint16_t) rx_count;
-//             uint16_t i;
-//     //      for (i = tx_count; i < rx_count; ++i)
-//             for (i = 0; i < rx_count; ++i)
-//                 rte_pktmbuf_free(pkts[i]);
-//         }
-//         printf("Core: %u  \tPackets received: %lu \n", id, counters[id]);
-// }
-
-// static void thread_ethdev_loop(uint16_t port_id, uint16_t queue_id)
-// {
-//         struct rte_mbuf *pkts[BURST_SIZE];
-//         uint16_t rx_count;
-//         uint16_t tx_count;
-
-//         while (!should_stop()) {
-//             rx_count = rte_eth_rx_burst(port_id, queue_id, pkts, BURST_SIZE);
-//             tx_count = rte_eth_tx_burst(port_id, queue_id, pkts, rx_count);
-//             counters[queue_id] += (uint16_t) rx_count;
-//             uint16_t i;
-//             for (i = tx_count; i < rx_count; ++i)
-//                     rte_pktmbuf_free(pkts[i]);
-//         }
-//         printf("Core: %u  \tPackets received: %lu \n", queue_id, counters[queue_id]);
-// }
-
-// struct context {
-//         int mode;
-//         int socket_id;
-//         uint16_t port_id;
-//         uint16_t nb_queues;
-//         const char *port_name;
-//         struct rte_mempool *pool;
-//         struct rte_ring **rx_rings;
-//         struct rte_ring **tx_rings;
-// };
-
-// static int thread_main(void *arg)
-// {
-//         struct context *ctx     = arg;
-//         unsigned lcore_id = rte_lcore_id();
-
-//         switch(ctx->mode) {
-//                 case ETHDEV_MODE:
-//                 case ETHDEV_RING_MODE:
-//                         thread_ethdev_loop(ctx->port_id, lcore_id);
-//                         break;
-
-//                 case NATIVE_RING_MODE:
-//                         thread_ring_loop(ctx->rx_rings[lcore_id], ctx->tx_rings[lcore_id], lcore_id);
-//                         break;
-//         }
-
-//         return 0;
-// }
-
-// static inline int
-// ethdev_init(uint16_t port, struct rte_mempool *mbuf_pool, uint16_t nb_queues)
-// {
-//         struct rte_eth_conf port_conf = {
-//                 .rxmode = {
-//                         .mq_mode = ETH_MQ_RX_NONE,
-//                         .max_rx_pkt_len = RTE_ETHER_MAX_LEN,
-//                 },
-//                 .txmode = {
-//                         .mq_mode = ETH_MQ_TX_NONE,
-//                 },
-//         };
-
-//         int socket_id = rte_eth_dev_socket_id(port);
-//         uint16_t q_id;
-//         int retval;
-
-//         if (!rte_eth_dev_is_valid_port(port))
-//                 return -1;
-
-//         retval = rte_eth_dev_configure(port, nb_queues, nb_queues, &port_conf);
-//         if (retval != 0)
-//                 return retval;
-
-//         uint16_t nb_rxd = DEFAULT_RX_RING_SIZE;
-//         uint16_t nb_txd = DEFAULT_TX_RING_SIZE;
-//         retval = rte_eth_dev_adjust_nb_rx_tx_desc(port, &nb_rxd, &nb_txd);
-//         if (retval != 0)
-//                 return retval;
-
-//         for (q_id = 0; q_id < nb_queues; q_id++) {
-//                 retval = rte_eth_rx_queue_setup(port, q_id, nb_rxd, socket_id, NULL, mbuf_pool);
-//                 if (retval < 0)
-//                         return retval;
-//         }
-
-//         for (q_id = 0; q_id < nb_queues; q_id++) {
-//                 retval = rte_eth_tx_queue_setup(port, q_id, nb_txd, socket_id, NULL);
-//                 if (retval < 0)
-//                         return retval;
-//         }
-
-//         retval = rte_eth_dev_start(port);
-//         if (retval < 0)
-//                 return retval;
-
-//         rte_eth_promiscuous_enable(port);
-
-//         return 0;
-// }
-
 
 int main(int argc, char **argv)
 {
@@ -3157,164 +2984,18 @@ int main(int argc, char **argv)
 
 #ifdef HAVE_DPDK
     int retval;
-    //rte_log_set_global_level(RTE_LOG_EMERG);
-    rte_log_set_global_level(RTE_LOG_WARNING);
+
+    rte_log_set_global_level(RTE_LOG_WARNING); // RTE_LOG_EMERG
 
     /* Initialize the DPDK EAL. */
     if((retval = rte_eal_init(argc, (char **)argv)) == -1) {
-        SCLogError(SC_ERR_INITIALIZATION, "DPDK EAL initialization error");
+        SCLogError(SC_ERR_DPDK_EAL_INIT, "DPDK EAL initialization error");
         return EXIT_FAILURE;
     } else {
         argv = &argv[retval];
         argc -= retval;
     }
 #endif
-//*******************************************************/
-//*******************Suricata BYPASS*********************/
-//     int retval = EXIT_SUCCESS;
-//     struct context ctx;
-
-//     rte_log_set_global_level(RTE_LOG_WARNING);
-
-//     signal(SIGSEGV, &handle_broken_pmd);
-
-//     int args = rte_eal_init(argc, argv);
-//     if (args < 0) {
-//             fprintf(stderr, "rte_eal_init() has failed: %d\n", args);
-//             return EXIT_FAILURE;
-//     }
-
-//     signal(SIGSEGV, SIG_DFL);
-
-//     argc -= args;
-//     argv += args;
-
-//     int proc_type = rte_eal_process_type();
-
-//     if (argc <= 1) {
-//             ctx.mode = NATIVE_RING_MODE;
-//             if (proc_type == RTE_PROC_PRIMARY)
-//                     ctx.mode = ETHDEV_MODE;
-//     } else if (!strcmp("ethdev", argv[1]) && proc_type == RTE_PROC_PRIMARY) {
-//             ctx.mode = ETHDEV_MODE;
-//     } else if (!strcmp("ethdev-ring", argv[1]) && proc_type != RTE_PROC_PRIMARY) {
-//             ctx.mode = ETHDEV_RING_MODE;
-//     } else if (!strcmp("native-ring", argv[1]) && proc_type != RTE_PROC_PRIMARY) {
-//             ctx.mode = NATIVE_RING_MODE;
-//     } else {
-//             fprintf(stderr, "invalid mode: %s for process type %s\n",
-//                             argv[1], proc_type ? "secondary" : "primary");
-//             rte_eal_cleanup();
-//             return EXIT_FAILURE;
-//     }
-
-//     ctx.port_id = 0;
-//     ctx.port_name = "suricata";
-//     ctx.socket_id = rte_socket_id();
-//     ctx.nb_queues = rte_lcore_count();
-
-//     if (argc >= 3) {
-//             ctx.port_name = argv[2];
-//     }
-
-//     //struct rte_ring *rx_rings[ctx.nb_queues];
-//     //struct rte_ring *tx_rings[ctx.nb_queues];
-//     //ctx.rx_rings = rx_rings;
-//     //ctx.tx_rings = tx_rings;
-
-//     ctx.rx_rings = malloc(sizeof(struct rte_ring *) * ctx.nb_queues);
-//     if (ctx.rx_rings == NULL) {
-//             return EXIT_FAILURE;
-//     }
-//     memset(ctx.rx_rings, 0, sizeof(struct rte_ring *) * ctx.nb_queues);
-
-//     ctx.tx_rings = malloc(sizeof(struct rte_ring *) * ctx.nb_queues);
-//     if (ctx.tx_rings == NULL) {
-//             return EXIT_FAILURE;
-//     }
-//         memset(ctx.tx_rings, 0, sizeof(struct rte_ring *) * ctx.nb_queues);
-
-//     if (ctx.mode == ETHDEV_RING_MODE || ctx.mode == NATIVE_RING_MODE) {
-//             uint16_t i;
-//             for (i = 0; i < ctx.nb_queues; ++i) {
-//                     char name[64];
-
-//                     snprintf(name, sizeof(name), "port_%s_tx%" PRIu16, ctx.port_name, i);
-//                     ctx.rx_rings[i] = rte_ring_lookup(name);
-//                     if (ctx.rx_rings[i] == NULL) {
-//                             fprintf(stderr, "rte_ring_lookup(): cannot get rx ring '%s'\n", name);
-//                             retval = EXIT_FAILURE;
-//                             goto rxtx_rings_fail;
-//                     }
-
-//                     snprintf(name, sizeof(name), "port_%s_rx%" PRIu16, ctx.port_name, i);
-//                     ctx.tx_rings[i] = rte_ring_lookup(name);
-//                     if (ctx.tx_rings[i] == NULL) {
-//                             fprintf(stderr, "rte_ring_lookup(): cannot get tx ring '%s'\n", name);
-//                             retval = EXIT_FAILURE;
-//                             goto rxtx_rings_fail;
-//                     }
-//             }
-//     }
-
-//     if (ctx.mode == ETHDEV_MODE) {
-//             ctx.pool = rte_pktmbuf_pool_create("pktmbuf_pool", DEFAULT_MEMPOOL_SIZE,
-//                             DEFAULT_MEMPOOL_CACHE_SIZE, 0, DEFAULT_PKT_SIZE, ctx.socket_id);
-
-//             if (ctx.pool == NULL) {
-//                     fprintf(stderr, "rte_pktmbuf_pool_create() has failed");
-//                     retval = EXIT_FAILURE;
-//                     goto mempool_fail;
-//             }
-
-//     } else if (ctx.mode == ETHDEV_RING_MODE) {
-//             char name[64];
-//             snprintf(name, sizeof(name), "port_%s", ctx.port_name);
-//             ctx.pool = rte_mempool_lookup(name);
-//             if (ctx.pool == NULL) {
-//                     fprintf(stderr, "rte_mempool_lookup(): cannot get mempool '%s'\n", name);
-//                     retval = EXIT_FAILURE;
-//                     goto mempool_fail;
-//             }
-
-//             ctx.port_id = rte_eth_from_rings("extern_port",
-//                             ctx.rx_rings,
-//                             ctx.nb_queues,
-//                             ctx.tx_rings,
-//                             ctx.nb_queues,
-//                             ctx.socket_id);
-//     }
-
-//     if (ctx.mode == ETHDEV_MODE || ctx.mode == ETHDEV_RING_MODE) {
-//             if (ethdev_init(ctx.port_id, ctx.pool, ctx.nb_queues) != 0) {
-//                     fprintf(stderr, "ethdev_init(): cannot init port %" PRIu16 "\n", ctx.port_id);
-//                     retval = EXIT_FAILURE;
-//                     goto ethdev_fail;
-//             }
-//     }
-
-//     printf("\nStarting all cores ... [Ctrl+C to quit]\n\n");
-
-//     signal(SIGINT, &handle_sig);
-//     signal(SIGTERM, &handle_sig);
-
-//     rte_eal_mp_remote_launch(thread_main, &ctx, CALL_MASTER);
-//         rte_eal_mp_wait_lcore();
-
-//     if (ctx.mode == ETHDEV_MODE || ctx.mode == ETHDEV_RING_MODE) {
-//             rte_eth_dev_close(ctx.port_id);
-//     }
-
-// ethdev_fail:
-//     if (ctx.mode == ETHDEV_MODE)
-//             rte_mempool_free(ctx.pool);
-
-// mempool_fail:
-// rxtx_rings_fail:
-//     rte_eal_cleanup();
-
-//     return retval;
-/************************************************/
 
     SuricataContext context;
     context.SCLogMessage = SCLogMessage;
@@ -3364,8 +3045,6 @@ int main(int argc, char **argv)
 
     /* Initialize the configuration module. */
     ConfInit();
-
-// dpdk_init
 
     if (ParseCommandLine(argc, argv, &suricata) != TM_ECODE_OK) {
         exit(EXIT_FAILURE);

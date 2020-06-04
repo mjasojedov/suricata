@@ -78,6 +78,9 @@ __thread uint64_t rwr_lock_cnt;
 static int SetCPUAffinity(uint16_t cpu);
 static void TmThreadDeinitMC(ThreadVars *tv);
 
+/** Suricata instance */
+extern SCInstance suricata;
+
 /* root of the threadvars list */
 ThreadVars *tv_root[TVT_MAX] = { NULL };
 
@@ -314,7 +317,9 @@ static void *TmThreadsSlotPktAcqLoop(void *td)
                                  " tmqh_out=%p",
                    s, s ? s->PktAcqLoop : NULL, tv->tmqh_in, tv->tmqh_out);
         TmThreadsSetFlag(tv, THV_CLOSED | THV_RUNNING_DONE);
-        pthread_exit((void *) -1);
+        if (suricata.run_mode != RUNMODE_DPDK) {
+            pthread_exit((void *) -1);
+        }
         return NULL;
     }
 
@@ -386,11 +391,9 @@ static void *TmThreadsSlotPktAcqLoop(void *td)
     PacketPoolDestroy();
 
     for (slot = s; slot != NULL; slot = slot->slot_next) {
-        //SCLogNotice("1");
         if (slot->SlotThreadExitPrintStats != NULL) {
             slot->SlotThreadExitPrintStats(tv, SC_ATOMIC_GET(slot->slot_data));
         }
-        //SCLogNotice("2");
         if (slot->SlotThreadDeinit != NULL) {
             r = slot->SlotThreadDeinit(tv, SC_ATOMIC_GET(slot->slot_data));
             if (r != TM_ECODE_OK) {
@@ -398,19 +401,22 @@ static void *TmThreadsSlotPktAcqLoop(void *td)
                 goto error;
             }
         }
-        //SCLogNotice("3");
         CheckSlot(slot);
     }
 
     tv->stream_pq = NULL;
     SCLogDebug("%s ending", tv->name);
     TmThreadsSetFlag(tv, THV_CLOSED);
-    //pthread_exit((void *) 0);
+    if (suricata.run_mode != RUNMODE_DPDK) {
+        pthread_exit((void *) 0);
+    }
     return NULL;
 
 error:
     tv->stream_pq = NULL;
-    //pthread_exit((void *) -1);
+    if (suricata.run_mode != RUNMODE_DPDK) {
+        pthread_exit((void *) -1);
+    }
     return NULL;
 }
 
@@ -1515,9 +1521,18 @@ static int TmThreadKillThread(ThreadVars *tv)
     }
 
     /* join it and flag it as dead */
-    //pthread_join(tv->t, NULL);
-    if (tv->type == TVT_PPT) {
-        rte_eal_wait_lcore(tv->lcore_id);
+    if (suricata.run_mode == RUNMODE_DPDK) {
+        if (tv->type == TVT_PPT) {
+#ifndef HAVE_DPDK
+            SCLogError(SC_ERR_RUNMODE, "Runmode DPDK selected, but not enabled during build. "
+                                   "See './configure --help' option '--enable-dpdk'.");
+            exit(EXIT_FAILURE);
+#else
+            rte_eal_wait_lcore(tv->lcore_id);
+#endif /* HAVE_DPDK */
+        } else {
+            pthread_join(tv->t, NULL);
+        }
     } else {
         pthread_join(tv->t, NULL);
     }
@@ -1905,28 +1920,40 @@ TmEcode TmThreadSpawn(ThreadVars *tv)
 
     TmThreadWaitForFlag(tv, THV_INIT_DONE | THV_RUNNING_DONE);
 
-    // rte_eal_mp_remote_launch(tv->tm_func, (void *)tv, CALL_MASTER);
-	//rte_eal_mp_wait_lcore();
-
     TmThreadAppend(tv, tv->type);
     return TM_ECODE_OK;
 }
 
+
+#ifdef HAVE_DPDK
+/**
+ * \brief Spawns a thread associated with the ThreadVars instance tv
+ *        Thread is spawned by DPDK API.
+ *
+ * \param tv        Pointer to the thread instance structure
+ * \param lcore_id  The identifier of the lcore on which 
+ *                  the thread should be executed
+ * 
+ * \retval TM_ECODE_OK on success and TM_ECODE_FAILED on failure
+ */
 TmEcode TmThreadSpawnDpdk(ThreadVars *tv, unsigned lcore_id)
 {
     if (tv->tm_func == NULL) {
         printf("ERROR: no thread function set\n");
         return TM_ECODE_FAILED;
     }
-
-    #ifdef HAVE_DPDK
-        rte_eal_remote_launch(tv->tm_func, (void *)tv, lcore_id);
-        //rte_eal_wait_lcore(tv->lcore_id);
-    #endif
-
+    int retval;
+    retval = rte_eal_remote_launch(tv->tm_func, (void *)tv, lcore_id);
+    if (retval != 0) {
+        printf("ERROR: Unable to launch function on lcore.\n");
+        return TM_ECODE_FAILED;
+    }
+   
     TmThreadAppend(tv, tv->type);
     return TM_ECODE_OK;
 }
+#endif
+
 
 /**
  * \brief Sets the thread flags for a thread instance(tv)

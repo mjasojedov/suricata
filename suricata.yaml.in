@@ -658,12 +658,10 @@ af-packet:
 
 # DPDK capture support
 dpdk:
-  - interface: default
-    threads: 16 # auto -- 'auto' option will set threads count to count of cpus
-  
-  # Mode of the dpdk aplication.
-  # Possible value are:
+  # Mode of the DPDK application.
+  # Possible values are:
   #  * ethdev:      Primary mode of application. Using real physical port.
+  #                 Port is identified by EAL parameter '-w'.
   #  * ethdev-ring: Secondary mode of application. Using ring buffers created by 
   #                 primary application. These rings are binded to virtual extern
   #                 port, which is then used the same way as in mode 'ethdev'.
@@ -671,8 +669,7 @@ dpdk:
   #                 primary application. Rings are used directly without creating
   #                 virtual port. This is the fastest variant of processing packets.
   # For *-ring modes, the '--proc-type=secondary' EAL parameter is desirable. 
-  mode: ethdev # ethdev | ethdev-ring | native-ring
-
+  mode: ethdev
   # Name of external port created by primary application. Used only for 
   # 'ethdev-ring' or 'native-ring' dpdk modes. Default value is 'suricata'.
   port-extern: suricata  
